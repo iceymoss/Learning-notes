@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+option go_package="/.;proto";
+//引入protobuf的内置类型
+import "google/protobuf/timestamp.proto";
+import "case.proto";
+
+//定义接口
+service Greeter {
+    rpc SayHello (HolleRequest) returns (HelloReply);
+    rpc Ping(IsEmpty) returns (Pong);
+}
+
+//枚举类型
+enum Gender{
+    MALE = 0;
+    FE_MALE = 1;
+}
+
+message HolleRequest {
+    string name = 1;
+    string url = 2;
+    Gender gender = 3;
+    map<string, string> m = 4;  //proto map类型
+    google.protobuf.Timestamp addTime = 5;  //protobuf的内置类型
+}
+
+message HelloReply {
+    string id = 1;
+    HolleRequest request = 2;
+}
+
