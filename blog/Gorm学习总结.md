@@ -870,13 +870,13 @@ db.Create(&UserTest{
 如下图
 UserTest:
 
-https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gorm/Cf8RbuetRt.png%21large.png
+![](https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gorm/Cf8RbuetRt.png%21large.png)
 
 
 
 CompanyTest:
 
-https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gorm/YaulAJyN5n.png%21large.png
+![](https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gorm/YaulAJyN5n.png%21large.png)
 
 
 
@@ -961,13 +961,13 @@ db.Create(&CreditCard{
 
 CreditCard：
 
-https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gorm/38MGHICZJ9.png%21large.png
+![](https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gorm/38MGHICZJ9.png%21large.png)
 
 
 
 User:
 
-https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gorm/GvY3HEal0M.png%21large.png
+![](https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gorm/GvY3HEal0M.png%21large.png)
 
 
 
@@ -1037,19 +1037,19 @@ type Language struct {
 
 users:
 
-https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gorm/yAA9XSIqrE.png%21large.png
+![](https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gorm/yAA9XSIqrE.png%21large.png)
 
 
 
 languages:
 
-https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gorm/04iX6MlHjn.png%21large.png
+![](https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gorm/04iX6MlHjn.png%21large.png)
 
 
 
 user_languages:
 
-https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gorm/rTkpLNX2d5.png%21large.png
+![](https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gorm/rTkpLNX2d5.png%21large.png)
 
 
 
@@ -1085,19 +1085,19 @@ db.Create(&User{
 
 users:
 
-https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gorm/B3bww30iuv.png%21large.png
+![](https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gorm/B3bww30iuv.png%21large.png)
 
 
 
 languages:
 
-https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gorm/kXCP0xrEu4.png%21large.png
+![](https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gorm/kXCP0xrEu4.png%21large.png)
 
 
 
 user_languages:
 
-https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gorm/sbTwgjhin2.png%21large.png
+![](https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gorm/sbTwgjhin2.png%21large.png)
 
 
 
@@ -1194,19 +1194,19 @@ db.Create(&Language{
 
 users:
 
-https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gorm/Vgc9bhbzSY.png%21large.png
+![](https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gorm/Vgc9bhbzSY.png%21large.png)
 
 
 
 languages:
 
-https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gorm/d3nKBbDfCw.png%21large.png
+![](https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gorm/d3nKBbDfCw.png%21large.png)
 
 
 
 user_languages:
 
-https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gorm/5xj7ehQdrw.png%21large.png
+![](https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gorm/5xj7ehQdrw.png%21large.png)
 
 
 
