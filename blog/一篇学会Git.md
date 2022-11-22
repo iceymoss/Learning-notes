@@ -9,7 +9,7 @@
 git仓库的初始化
 
 ```sh
-git inti name
+git init name
 ```
 
 
