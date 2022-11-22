@@ -383,7 +383,9 @@ func main() {
 
 由于是post请求我们使用postman提交表单：http://localhost:8083/Postform
 
-https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gin%E6%A1%86%E6%9E%B6/vp6Ppr23Lv.png%21large.png
+![queue1.png](https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gin%E6%A1%86%E6%9E%B6/vp6Ppr23Lv.png%21large.png)
+
+
 
 后台输出：
 
@@ -436,7 +438,7 @@ func main() {
 
 因为是post方法使用，访问：http://localhost:8083/Post?id=1&page=2
 
-https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gin%E6%A1%86%E6%9E%B6/aXQ0r7FJEA.png%21large.png
+![post.png](https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gin%E6%A1%86%E6%9E%B6/aXQ0r7FJEA.png%21large.png)
 
 
 
@@ -519,7 +521,7 @@ func main() {
 
 
 
-https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gin%E6%A1%86%E6%9E%B6/eoOzPib2wb.png%21large.png
+![](https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gin%E6%A1%86%E6%9E%B6/eoOzPib2wb.png%21large.png)
 
 
 
@@ -735,13 +737,13 @@ func main() {
 
 如果参数不满足 tag 中的条件，则会返回如下结果：
 
-https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gin%E6%A1%86%E6%9E%B6/QMwRltZo11.png%21large.png
+![](https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gin%E6%A1%86%E6%9E%B6/QMwRltZo11.png%21large.png)
 
 
 
 当我们输入满足 tag 中的条件，就成功返回了：
 
-https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gin%E6%A1%86%E6%9E%B6/d6GM1eyNwm.png%21large.png
+![](https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gin%E6%A1%86%E6%9E%B6/d6GM1eyNwm.png%21large.png)
 
 
 
@@ -899,7 +901,7 @@ func main() {
 
 将Headers，增加字段：
 
-https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gin%E6%A1%86%E6%9E%B6/vX75tL6Gwe.png%21large.png
+![](https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gin%E6%A1%86%E6%9E%B6/vX75tL6Gwe.png%21large.png)
 
 
 
@@ -970,13 +972,13 @@ func TokenRequired() gin.HandlerFunc {
 
 **原因**：当我们启动服务后，Gin 会有一个类似于任务队列将所有配置的中间件和在注册处理方法压入队列中：
 
-https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gin%E6%A1%86%E6%9E%B6/loO5d6WBkD.png%21large.png
+![](https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gin%E6%A1%86%E6%9E%B6/loO5d6WBkD.png%21large.png)
 
 
 
 在处理业务代码之前，会将所有注册路由中的中间件以队列的执行方式执行，比如上面我们：
 
-https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gin%E6%A1%86%E6%9E%B6/WLWtzFqCOC.png%21large.png
+![](https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gin%E6%A1%86%E6%9E%B6/WLWtzFqCOC.png%21large.png)
 
 
 
@@ -984,7 +986,7 @@ https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gin%E6%A1%86%E6%9E%B6/WL
 
 当我们在实例十三中执行 return 他只是将当前函数返回，但是后面的方法仍然是按逻辑执行的，很显然这不是我们想要的结果，不满足验证条件的情况，应该将对此时的 client 终止服务，如果要终止服务就应该将图中的箭头跳过所有方法：
 
-https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gin%E6%A1%86%E6%9E%B6/aSmEdHBReP.png%21large.png
+![](https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gin%E6%A1%86%E6%9E%B6/aSmEdHBReP.png%21large.png)
 
 这样整个服务才是真正的终止，下面再来看看 `Abort()`:
 
@@ -1015,15 +1017,17 @@ func (c *Context) Next() {
 }
 ```
 
-https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gin%E6%A1%86%E6%9E%B6/EYVerBi4j0.png%21large.png
+执行过程：
 
-#### 
-
-https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gin%E6%A1%86%E6%9E%B6/Ct3AXNzBVg.png%21large.png
+![](https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gin%E6%A1%86%E6%9E%B6/EYVerBi4j0.png%21large.png)
 
 
 
-https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gin%E6%A1%86%E6%9E%B6/QwAbcXGxTx.png%21large.png
+![](https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gin%E6%A1%86%E6%9E%B6/Ct3AXNzBVg.png%21large.png)
+
+
+
+![](https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gin%E6%A1%86%E6%9E%B6/QwAbcXGxTx.png%21large.png)
 
 
 
@@ -1084,7 +1088,7 @@ func main() {
 当我们在浏览器中访问：[localhost:8085/index](http://localhost:8085/index)
 获取到:
 
-https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gin%E6%A1%86%E6%9E%B6/05xgpzzzzd.png%21large.png
+![](https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gin%E6%A1%86%E6%9E%B6/05xgpzzzzd.png%21large.png)
 
 
 
@@ -1172,9 +1176,7 @@ func main() {
 }
 ```
 
-这样我们访问：[localhost:8085/goods/list](http://localhost:8085/goods/list) 或者 [http://localhost:8085/user/list](http://localhost:8085/user/list)都能访问到:
-
-https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gin%E6%A1%86%E6%9E%B6/TsPHtlG2AF.png%21large.png
+这样我们访问：[localhost:8085/goods/list](http://localhost:8085/goods/list) 或者 [http://localhost:8085/user/list](http://localhost:8085/user/list)都能访问到
 
 
 
@@ -1255,7 +1257,7 @@ func main() {
 然后访问：[localhost:8085/user/list](http://localhost:8085/user/list)
 可以看到：
 
-https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gin%E6%A1%86%E6%9E%B6/TsPHtlG2AF.png%21large.png
+![](https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gin%E6%A1%86%E6%9E%B6/TsPHtlG2AF.png%21large.png)
 
 
 
