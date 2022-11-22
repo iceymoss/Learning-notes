@@ -68,7 +68,7 @@ RPC 就显得如此重要了。
 
    整个流程如下：
 
-   https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gorm/5glZiYH2P6.png
+   ![](https://blogfiles-iceymoss.oss-cn-hangzhou.aliyuncs.com/gorm/5glZiYH2P6.png)
 
    
 
