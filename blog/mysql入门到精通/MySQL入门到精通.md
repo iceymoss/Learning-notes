@@ -20,6 +20,8 @@ MySQL 支持所有标准 SQL 数值数据类型。
 
 BIT数据类型保存位字段值，并且支持 MyISAM、MEMORY、InnoDB 和 BDB表。
 
+
+
 作为 SQL 标准的扩展，MySQL 也支持整数类型 TINYINT、MEDIUMINT 和 BIGINT。下面的表显示了需要的每个整数类型的存储和范围。
 
 | 类型         | 大小                                     | 范围（有符号）                                               | 范围（无符号）                                               | 用途            |
@@ -155,11 +157,11 @@ CREATE TABLE emp(
 创建表：
 ```mysql
 CREATE TABLE 表名(
-	字段1 字段1类型 [COMMENT 字段1注释],
-	字段2 字段2类型 [COMMENT 字段2注释],
-	字段3 字段3类型 [COMMENT 字段3注释],
-	...
-	字段n 字段n类型 [COMMENT 字段n注释]
+  字段1 字段1类型 [COMMENT 字段1注释],
+  字段2 字段2类型 [COMMENT 字段2注释],
+  字段3 字段3类型 [COMMENT 字段3注释],
+  ...
+  字段n 字段n类型 [COMMENT 字段n注释]
 )[ COMMENT 表注释 ];
 ```
 实例：
@@ -288,19 +290,19 @@ DELETE FROM user_info
 语法：
 ```mysql
 SELECT
-	字段列表
+  字段列表
 FROM
-	表名字段
+  表名字段
 WHERE
-	条件列表
+  条件列表
 GROUP BY
-	分组字段列表
+  分组字段列表
 HAVING
-	分组后的条件列表
+  分组后的条件列表
 ORDER BY
-	排序字段列表
+  排序字段列表
 LIMIT
-	分页参数
+  分页参数
 ```
 
 #### 基础查询
@@ -519,7 +521,7 @@ select * from emp_info where gender = "男" && age >= 30 && age <= 40 order by a
 
 #### DQL执行顺序
 
-FROM(表名列表-> WHERE(条件列表) -> GROUP BY(分组字段列表  => having分组后条件列表) -> SELECT(字段列表) -> ORDER BY(排序字段列表) -> LIMIT(分页参数)
+FROM(表名列表)-> WHERE(条件列表) -> GROUP BY(分组字段列表  => having分组后条件列表) -> SELECT(字段列表) -> ORDER BY(排序字段列表) -> LIMIT(分页参数)
 
 
 
@@ -581,11 +583,77 @@ drop user 'test'@'localhost';
 查询权限：
 `SHOW GRANTS FOR '用户名'@'主机名';`
 
+```mysql
+show grants for 'test'@'localhost' ;
+```
+
+可以看到：(没有权限)
+
+|        Grants for test@localhost         |
+| :--------------------------------------: |
+| GRANT USAGE ON *.* TO `test`@`localhost` |
+
+在控制台进入mysql:
+
+```
+mysql -u test -p
+Enter password:
+Welcome to the MySQL monitor.  Commands end with ; or \g.
+Your MySQL connection id is 16
+Server version: 8.0.28 MySQL Community Server - GPL
+
+Copyright (c) 2000, 2022, Oracle and/or its affiliates.
+
+Oracle is a registered trademark of Oracle Corporation and/or its
+affiliates. Other names may be trademarks of their respective
+owners.
+
+Type 'help;' or '\h' for help. Type '\c' to clear the current input statement.
+
+mysql> show databases;
++--------------------+
+| Database           |
++--------------------+
+| information_schema |
++--------------------+
+1 row in set (0.01 sec)
+
+```
+
 授予权限：
 `GRANT 权限列表 ON 数据库名.表名 TO '用户名'@'主机名';`
 
+```mysql
+# 授权
+grant all on itcast.user_info to 'test'@'localhost' ;
+```
+
+再次进入控制台：
+
+```
+mysql> show databases;
++--------------------+
+| Database           |
++--------------------+
+| information_schema |
+| itcast             |
++--------------------+
+2 rows in set (0.00 sec)
+```
+
 撤销权限：
 `REVOKE 权限列表 ON 数据库名.表名 FROM '用户名'@'主机名';`
+
+```mysql
+# 撤销权限
+revoke all on itcast.user_info from 'test'@'localhost' ;
+```
+
+撤销所有数据库的权限
+
+```mysql
+revoke all on *.* from 'test'@'localhost' ;
+```
 
 ##### 注意事项
 
@@ -633,6 +701,15 @@ SELECT TRIM(' Hello World ');
 SELECT SUBSTRING('Hello World', 1, 5);
 ```
 
+#### 题目：
+
+```mysql
+# 由于业务系统需求变更，需要全体员工的工号改为8位数，不足的前面填充0补全
+update emp_info set emp_id = lpad(emp_id, 8, "0");
+```
+
+
+
 ### 数值函数
 
 常见函数：
@@ -644,6 +721,25 @@ SELECT SUBSTRING('Hello World', 1, 5);
 | MOD(x, y)  | 返回x/y的模  |
 | RAND() | 返回0~1内的随机数 |
 | ROUND(x, y) | 求参数x的四舍五入值，保留y位小数 |
+
+示例代码：
+
+```mysql
+select ceil(0.5);
+select floor(1.5);
+select mod(10, 6);
+select rand();
+select ROUND(10.23232343, 2);
+```
+
+#### 题目
+
+```mysql
+# 根据mysql数据库的函数，生成一个六位数的随机数
+select rpad(round(rand() * 1000000, 0), 6, "0");
+```
+
+
 
 ### 日期函数
 
@@ -660,12 +756,29 @@ SELECT SUBSTRING('Hello World', 1, 5);
 | DATE_ADD(date, INTERVAL expr type)  | 返回一个日期/时间值加上一个时间间隔expr后的时间值  |
 | DATEDIFF(date1, date2)  | 返回起始时间date1和结束时间date2之间的天数  |
 
-例子：
+示例：
 
 ```mysql
--- DATE_ADD
-SELECT DATE_ADD(NOW(), INTERVAL 70 YEAR);
+select CURDATE();
+select curtime();
+select now();
+select year(now());
+select month(now());
+select day(now());
+select date_add(now(), interval 120 DAY);
+select datediff("2024-06-16","2020-09-20");
 ```
+
+#### 题目
+
+```mysql
+# 查询所有员工的入职天数，并根据入职天数倒序排序
+select name, datediff(now(), join_time) from emp_info order by datediff(now(), join_time) desc;
+# 或者起别名
+select name, datediff(now(), join_time) as work_time from emp_info order by work_time desc;
+```
+
+
 
 ### 流程函数
 
@@ -681,14 +794,16 @@ SELECT DATE_ADD(NOW(), INTERVAL 70 YEAR);
 例子：
 
 ```mysql
+# 查询员工表中的员工姓名和年龄(年龄>30为中年， 其他为青年)
 select
-	name,
-	(case when age > 30 then '中年' else '青年' end)
+  name,
+  (case when age > 30 then '中年' else '青年' end)
 from employee;
-select
-	name,
-	(case workaddress when '北京市' then '一线城市' when '上海市' then '一线城市' else '二线城市' end) as '工作地址'
-from employee;
+
+# 查询员工表中姓名和所在城市(如果是北京/上海 则展示一线城市， 其他则展示二线城市)
+select name, 
+(case work_adderss when '北京' then '一线城市' when '上海' then "一线城市" else '二线城市' end) as '工作地点'
+ from emp_info;
 ```
 
 ## 约束
@@ -721,11 +836,11 @@ from employee;
 
 ```mysql
 create table user(
-	id int primary key auto_increment,
-	name varchar(10) not null unique,
-	age int check(age > 0 and age < 120),
-	status char(1) default '1',
-	gender char(1)
+  id int primary key auto_increment,
+  name varchar(10) not null unique,
+  age int check(age > 0 and age < 120),
+  status char(1) default '1',
+  gender char(1)
 );
 ```
 
@@ -735,9 +850,9 @@ create table user(
 
 ```mysql
 CREATE TABLE 表名(
-	字段名 字段类型,
-	...
-	[CONSTRAINT] [外键名称] FOREIGN KEY(外键字段名) REFERENCES 主表(主表列名)
+  字段名 字段类型,
+  ...
+  [CONSTRAINT] [外键名称] FOREIGN KEY(外键字段名) REFERENCES 主表(主表列名)
 );
 ALTER TABLE 表名 ADD CONSTRAINT 外键名称 FOREIGN KEY (外键字段名) REFERENCES 主表(主表列名);
 
@@ -1072,7 +1187,7 @@ MySQL体系结构：
 show create table account;
 -- 建表时指定存储引擎
 CREATE TABLE 表名(
-	...
+  ...
 ) ENGINE=INNODB;
 -- 查看当前数据库支持的存储引擎
 show engines;
@@ -1172,10 +1287,10 @@ Memory 引擎的表数据是存储在内存中的，受硬件问题、断电问�
 
 慢查询日志记录了所有执行时间超过指定参数（long_query_time，单位：秒，默认10秒）的所有SQL语句的日志。
 MySQL的慢查询日志默认没有开启，需要在MySQL的配置文件（/etc/my.cnf）中配置如下信息：
-	# 开启慢查询日志开关
-	slow_query_log=1
-	# 设置慢查询日志的时间为2秒，SQL语句执行时间超过2秒，就会视为慢查询，记录慢查询日志
-	long_query_time=2
+  # 开启慢查询日志开关
+  slow_query_log=1
+  # 设置慢查询日志的时间为2秒，SQL语句执行时间超过2秒，就会视为慢查询，记录慢查询日志
+  long_query_time=2
 更改后记得重启MySQL服务，日志文件位置：/var/lib/mysql/localhost-slow.log
 
 查看慢查询日志开关状态：
@@ -1198,8 +1313,8 @@ profiling 默认关闭，可以通过set语句在session/global级别开启 prof
 
 EXPLAIN 或者 DESC 命令获取 MySQL 如何执行 SELECT 语句的信息，包括在 SELECT 语句执行过程中表如何连接和连接的顺序。
 语法：
-	# 直接在select语句之前加上关键字 explain / desc
-	EXPLAIN SELECT 字段列表 FROM 表名 HWERE 条件;
+  # 直接在select语句之前加上关键字 explain / desc
+  EXPLAIN SELECT 字段列表 FROM 表名 HWERE 条件;
 
 EXPLAIN 各字段含义：
 
