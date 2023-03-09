@@ -846,6 +846,8 @@ create table user(
 
 ### 外键约束
 
+对于外键约束关系，我们一般在“多”的表中添加外键字段，同时我们称为子表，对于另一张表主键做子表的外键的表叫父表。
+
 添加外键：
 
 ```mysql
@@ -860,10 +862,55 @@ ALTER TABLE 表名 ADD CONSTRAINT 外键名称 FOREIGN KEY (外键字段名) REF
 alter table emp add constraint fk_emp_dept_id foreign key(dept_id) references dept(id);
 ```
 
+#### 实例：
+
+```mysql
+create table emp_info(
+    id int primary key auto_increment comment 'id',
+    name varchar(10) not null comment '姓名',
+    age int comment '年龄',
+    job varchar(20) comment '职位',
+    salary int comment '薪水',
+    entrydate date comment '入职时间',
+    manageryid int comment '管理者id',
+    dept_id int comment '部门id'
+)comment '员工信息表';
+
+
+insert into emp_info(name, age, job, salary, entrydate, manageryid, dept_id) 
+values ("张样", 27, "总经理", 100000, '2014-5-11',1, 1 ),
+        ("李封", 24, "部门经理", 70000, '2016-5-11',2, 1 ),
+        ("向坑", 26, "部门经理", 70000, '2015-5-11',2, 1 ),
+        ("杨呼", 23, "开发", 15000, '2021-5-11',3, 2 ),
+        ("成开", 24, "ui", 12000, '2020-5-11',4, 2 ),
+        ("李云", 22, "测试", 10000, '2014-5-11',3, 3 ),
+        ("齐阳", 24, "运维", 10000, '2014-5-11',4, 3 ),
+        ("开立", 25, "开发", 20000, '2019-5-11',3, 2 );
+        
+create table dept(
+    id int primary key auto_increment,
+    name varchar(10) unique
+);
+
+insert into dept(name) values ("管理"),("开发"),("运维"),("产品");  
+
+# 添加外键
+alter table emp_info add constraint fk_emp_dept_id foreign key(dept_id) references dept(id);
+
+```
+
 删除外键：
 `ALTER TABLE 表名 DROP FOREIGN KEY 外键名;`
 
+```mysql
+alter table emp_info drop foreign Key fk_emp_dept_id;
+```
+
+
+
 #### 删除/更新行为
+
+当我们添加外键后，就不能随意修改数据了，因为会影响到另一张表的数据。
 
 | 行为  | 说明  |
 | ------------ | ------------ |
@@ -875,6 +922,12 @@ alter table emp add constraint fk_emp_dept_id foreign key(dept_id) references de
 
 更改删除/更新行为：
 `ALTER TABLE 表名 ADD CONSTRAINT 外键名称 FOREIGN KEY (外键字段) REFERENCES 主表名(主表字段名) ON UPDATE 行为 ON DELETE 行为;`
+
+```mysql
+alter table emp_info add constraint fk_emp_dept_id foreign key(dept) references dept(id) on update CASCADE on delete CASCADE;
+```
+
+
 
 ## 多表查询
 
@@ -890,17 +943,85 @@ alter table emp add constraint fk_emp_dept_id foreign key(dept_id) references de
 关系：一个部门对应多个员工，一个员工对应一个部门
 实现：在多的一方建立外键，指向一的一方的主键
 
+实例代码：外键约束部分，员工和部门之间的关系
+
 #### 多对多
 
 案例：学生与课程
 关系：一个学生可以选多门课程，一门课程也可以供多个学生选修
 实现：建立第三张中间表，中间表至少包含两个外键，分别关联两方主键
 
+实例代码：
+
+```mysql
+# 创建学生表
+create table student(
+    id int primary key auto_increment comment '主键',
+    name varchar(20) not null comment '姓名',
+    no varchar(10) unique not null comment '学号'
+)comment '学生信息表';
+
+insert into student(name, no) values ('杨可', '202045029'),('冯即', '202043015'),('李明', '202028043'),('澄江','202024024');
+insert into student(name, no) values ('高邑', '202045023'),('冯刚', '202063015'),('纳尼', '202029043'),('八嘎','202014024');
+
+# 创建课程表
+create table course(
+    id int primary key auto_increment comment '主键',
+    name varchar(20) not null comment '课程名'
+)comment '课程信息表';
+insert into course(name) values ("java程序设计"),('数据结构与算法'),('经济学原理'),("地理信息系统");
+
+# 建立中间表,将学生表和课程表的主键分别做中间表的外键
+create table stu_cour(
+    id int primary key auto_increment comment '主键',
+    student_id int not null comment '学生id',
+    course_id int not null comment '课程id',
+    constraint fk_student_id foreign key (student_id) references student(id),
+    constraint fk_course_id foreign key (course_id) references course(id)
+)comment '学生课程中间表';
+
+insert into stu_cour(student_id, course_id) values (1, 1),(1, 3),(1, 2),(4, 1),(5, 4),(6, 1),(7, 2),(8, 1);
+```
+
+
+
 #### 一对一
 
 案例：用户与用户详情
-关系：一对一关系，多用于单表拆分，将一张表的基础字段放在一张表中，其他详情字段放在另一张表中，以提升操作效率
+关系：一对一关系，多用于单表拆分，将一张表的基础字段放在一张表中，其他详情字段放在另一张表中，以提升操作效率；例如：某一种表中既有个人的基本信息，又有个人的教育经历信息等，当我们在使用张表时，并不需要个人教育经历，为例提高操作效率，我们就需要将基本信息和教育经历各自存入一张表中，通过在任意一方加入外键进行关联。
 实现：在任意一方加入外键，关联另外一方的主键，并且设置外键为唯一的（UNIQUE）
+
+实例代码：
+
+```mysql
+# 创建基本信息表
+create table tb_user(
+    id int primary key auto_increment comment '主键',
+    name varchar(20) not null comment '姓名',
+    age int not null comment '年龄',
+    gender char(1) not null comment '性别:1男;2女',
+    phone varchar(11) not null comment '电话'
+)comment '基本信息表';
+
+insert into tb_user(name, age, gender, phone) values('李明', 24, '1','12345678910'),('李客服', 21, '1','12345678910'),('杨看见', 23, '1','12345678910'),('成开开', 23, '2','12345678910'),('李明', 23, '1','12345678910');
+
+# 创建教育经历表
+create table tb_user_edu(
+    id int primary key auto_increment comment '主键',
+    degree varchar(20) not null comment '学历',
+    major varchar(20) not null comment '专业',
+    primay_stu varchar(30) not null comment '小学',
+    middel_stu varchar(30) not null comment '中学',
+    university varchar(30) not null comment '大学',
+  	# 注意：两表之间是一一对应的所以每一行只能对应一个值，即：unique
+    user_id int unique not null comment '外键',
+    constraint fk_user_id foreign key (user_id) references tb_user(id)
+)comment '教育经历表';
+
+insert into tb_user_edu(degree,major,primay_stu, middel_stu,university,user_id) values('本科','计算机','北京市第一小学','北京市第一中学','北京大学',1),('本科','地理学','北京市第一小学','北京市第一中学','武汉大学',2),('本科','核动力','北京市第一小学','北京市第一中学','清华大学',3),('本科','英语','北京市第一小学','北京市第一中学','厦门大学',4),('本科','法学','北京市第一小学','北京市第一中学','厦门大学',5);
+```
+
+
 
 ### 查询
 
@@ -912,12 +1033,31 @@ alter table emp add constraint fk_emp_dept_id foreign key(dept_id) references de
 消除无效笛卡尔积：
 `select * from employee, dept where employee.dept = dept.id;`
 
+例如上面实例中
+
+```mysql
+select * from tb_user,tb_user_edu where tb_user.id = tb_user_edu.user_id;
+```
+
+
+
 ### 内连接查询
 
 内连接查询的是两张表交集的部分
 
 隐式内连接：
 `SELECT 字段列表 FROM 表1, 表2 WHERE 条件 ...;`
+
+例子:
+
+```mysql
+# 隐式内连接
+# 查询每一个员工的姓名及管理的部门
+-- emp_info, dept
+select emp_info.name, dept.name from emp_info, dept where emp_info.dept = dept.id;
+# 起别名
+select e.name, d.name from emp_info as e, dept as d where e.dept = d.id;
+```
 
 显式内连接：
 `SELECT 字段列表 FROM 表1 [ INNER ] JOIN 表2 ON 连接条件 ...;`
@@ -927,35 +1067,43 @@ alter table emp add constraint fk_emp_dept_id foreign key(dept_id) references de
 例子：
 
 ```mysql
--- 查询员工姓名，及关联的部门的名称
--- 隐式
-select e.name, d.name from employee as e, dept as d where e.dept = d.id;
--- 显式
-select e.name, d.name from employee as e inner join dept as d on e.dept = d.id;
+# 显式内连接
+# 查询每一个员工的姓名及管理的部门
+-- emp_info, dept
+select e.name, d.name from emp_info as e inner join dept as d on e.dept = d.id;
 ```
 
 ### 外连接查询
 
 左外连接：
-查询左表所有数据，以及两张表交集部分数据
+查询左表所有数据(**注意：包括左表中未被关联的数据，但是右表中未被关联的数据查不到的**），以及两张表交集部分数据
 `SELECT 字段列表 FROM 表1 LEFT [ OUTER ] JOIN 表2 ON 条件 ...;`
 相当于查询表1的所有数据，包含表1和表2交集部分数据
 
+```mysql
+# 外连接
+# 查询emp_info表中的所以数据，以及对应的部门
+select e.*, d.name from emp_info as e left outer join dept as d on  e.dept = d.id;
+```
+
+
+
 右外连接：
-查询右表所有数据，以及两张表交集部分数据
+查询右表所有数据(**注意：包括右表中未被关联的数据，同理**），以及两张表交集部分数据
 `SELECT 字段列表 FROM 表1 RIGHT [ OUTER ] JOIN 表2 ON 条件 ...;`
 
 例子：
 
 ```mysql
--- 左
-select e.*, d.name from employee as e left outer join dept as d on e.dept = d.id;
-select d.name, e.* from dept d left outer join emp e on e.dept = d.id;  -- 这条语句与下面的语句效果一样
--- 右
-select d.name, e.* from employee as e right outer join dept as d on e.dept = d.id;
+# 查询dept表中的所有数据，并查询对应的员工信息
+select d.*,e.name from emp_info as e right outer join dept as d on  e.dept = d.id;
 ```
 
 左连接可以查询到没有dept的employee，右连接可以查询到没有employee的dept
+
+
+
+# 待续
 
 ### 自连接查询
 
