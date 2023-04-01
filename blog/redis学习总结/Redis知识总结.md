@@ -149,9 +149,578 @@ getset key1 redis #先获取，再设置，如果不存在返回nil，设置新�
 - 统计多单位的数量
 
 
+## 列表(list)
+
+redis中list可以被设计为栈，队列，阻塞队列等。
+
+list使用的核心是所有命令都是以`L`开头的（不区分大小写)，默认是先进后出。
+
+* `lpush listname item`向列表中添加元素（从list左边添加数据)
+
+  实例：
+
+  ```sh
+  127.0.0.1:6379> lpush userlist "iceymoss"
+  1
+  127.0.0.1:6379> lpush userlist "jierkill"
+  2
+  127.0.0.1:6379> lpush userlist "srenlag"
+  3
+  127.0.0.1:6379> lpush userlist "moskel"
+  4
+  ```
+
+* `lrange listname indexstart indexend`索取list数据
+
+  ```sh
+  127.0.0.1:6379> lrange userlist 0 -1
+  [
+      "moskel",
+      "srenlag",
+      "jierkill",
+      "iceymoss"
+  ]
+  ```
+
+  数据默认以栈的方式加入list
+
+* `rpush listname item`从list右边添加数据
+
+  ```sh
+  127.0.0.1:6379> rpush userlist "iceymoss"
+  1
+  127.0.0.1:6379> rpush userlist "jierkill"
+  2
+  127.0.0.1:6379> rpush userlist "srenlag"
+  3
+  127.0.0.1:6379> rpush userlist "moskel"
+  4
+  127.0.0.1:6379> lrange userlist 0 -1
+  [
+      "iceymoss",
+      "jierkill",
+      "srenlag",
+      "moskel"
+  ]
+  ```
+
+* `lpop 默认弹出左边第一个元素`
+
+  ```sh
+  127.0.0.1:6379> lrange userlist 0 -1
+  [
+      "moskel",
+      "srenlag",
+      "jierkill",
+      "iceymoss"
+  ]
+  127.0.0.1:6379> lpop userlist
+  moskel
+  127.0.0.1:6379> lpop userlist
+  srenlag
+  127.0.0.1:6379> lpop userlist
+  jierkill
+  127.0.0.1:6379> lpop userlist
+  iceymoss
+  127.0.0.1:6379> lpop userlist
+  (nil)
+  ```
+
+  我们将`lpush`和`lpop`结合起来userlist变成了一个栈，即先进后出。
+
+* `rpop默认弹出右边第一个元素`
+
+  ```sh
+  127.0.0.1:6379> lrange userlist 0 -1
+  [
+      "iceymoss",
+      "jierkill",
+      "srenlag",
+      "moskel"
+  ]
+  127.0.0.1:6379> lpop userlist
+  iceymoss
+  127.0.0.1:6379> lpop userlist
+  jierkill
+  127.0.0.1:6379> lpop userlist
+  srenlag
+  127.0.0.1:6379> lpop userlist
+  moskel
+  127.0.0.1:6379> lpop userlist
+  (nil)
+  ```
+
+  我们将`rpush`和`lpop`(`lpush`和`rpop`)结合起来userlist就变成了一个队列，即先进先出。
+
+  
+
+* ` lindex` 通过下标获取值
+
+  ```sh
+  127.0.0.1:6379> lrange userlist 0 -1
+  [
+      "iceymoss2",
+      "iceymoss1",
+      "iceymoss"
+  ]
+  127.0.0.1:6379> lindex userlist 0
+  iceymoss2
+  127.0.0.1:6379> lindex userlist -1
+  iceymoss
+  127.0.0.1:6379> 
+  ```
+
+* `llen `获取keylist的长度
+
+  ```sh
+  127.0.0.1:6379> llen userlist
+  3
+  ```
+
+* `lrem`移除指定的值
+
+  ```sh
+  127.0.0.1:6379> lrange userlist 0 -1
+  [
+      "iceymoss3",
+      "iceymoss3",
+      "iceymoss3",
+      "iceymoss2",
+      "iceymoss1",
+      "iceymoss"
+  ]
+  127.0.0.1:6379> lrem userlist 1 "iceymoss" #移除uselist中的一个值: iceymoss
+  1
+  127.0.0.1:6379> lrem userlist 3 "iceymoss3" #移除userlist中的3个值，iceymoss3
+  3
+  127.0.0.1:6379> lrange userlist 0 -1
+  [
+      "iceymoss2",
+      "iceymoss1"
+  ]
+  ```
+
+* `ltrim`通过下标截取指定下标的list操作，截取后只剩下截取后的结果
+
+  ```sh
+  ltrim mylist 1 2
+  ```
+
+* `rpoplpush userlist userlist1`将先对userlist进行rpop操作获取到数据，然后对userlist1进行lpush操作。
+
+  ```sh
+  127.0.0.1:6379> lrange userlist 0 -1
+  [
+      "iceymoss3",
+      "iceymoss2",
+      "iceymoss1"
+  ]
+  127.0.0.1:6379> rpoplpush userlist userlist1
+  iceymoss1
+  127.0.0.1:6379> lrange userlist1 0 -1
+  [
+      "iceymoss1"
+  ]
+  ```
+
+  
+
+*  `lset`更新操作，目标元素要先存在，否则失败
+
+  ```sh
+  127.0.0.1:6379> lrange userlist1 0 -1
+  [
+      "iceymoss1"
+  ]
+  127.0.0.1:6379> lset userlist1 0 "yangkuang"
+  OK
+  127.0.0.1:6379> lrange userlist1 0 -1
+  [
+      "yangkuang"
+  ]
+  127.0.0.1:6379> 
+  ```
+
+
+
+* ` linsert` 列表插入操作
+
+  ```sh
+  127.0.0.1:6379> linsert userlist1 before "yangkuang" "你好呀" #向uselist1中“yangkuang"前后插入
+  2 
+  127.0.0.1:6379> lrange userlist1 0 -1
+  [
+      "你好呀",
+      "yangkuang"
+  ]
+  ```
+
+>总结：
+>
+>- list实际上是一个链表，before node after，left，right 都可以插入值
+>- 如果key不存在，创建新的链表
+>- 如果key存在，新增内容
+>- 如果移除了所有值，空链表，也代表不存在！
+>- 在两边插入或者改动值，效率最高！中间元素，相对来说效率会低一点
+
+
+
+## 集合(set)
+
+set是集合，里面的元素是无序且唯一的
+
+对set操作的核心是使用`S`
+
+```sh
+# 使用sadd进行添加元素
+127.0.0.1:6379> sadd username "iceymoss"  
+1
+127.0.0.1:6379> sadd username "iceymos1"
+1
+127.0.0.1:6379> sadd username "iceymos2"
+
+# 使用smembers查看元素
+127.0.0.1:6379> smembers username 
+[
+    "iceymos1",
+    "iceymos2",
+    "iceymos3",
+    "iceymoss"
+]
+
+# sismember判断某元素是否在集合中
+127.0.0.1:6379> sismember username "iceymoss2"
+0 #返回0表示不在
+
+# scard返回金集合的元素个数
+127.0.0.1:6379> scard username
+4
+
+# srem 移除集合中指定元素
+127.0.0.1:6379> smembers username
+[
+    "iceymos1",
+    "iceymos2",
+    "iceymos3",
+    "iceymoss"
+]
+127.0.0.1:6379> srem username "iceymoss"
+1
+127.0.0.1:6379> smembers username
+[
+    "iceymos1",
+    "iceymos2",
+    "iceymos3"
+]
+
+# srandmember随机抽取一个集合中的元素
+127.0.0.1:6379> srandmember username
+iceymos2
+127.0.0.1:6379> srandmember username
+iceymos2
+127.0.0.1:6379> srandmember username
+iceymos3
+
+# spop随机移除元素
+127.0.0.1:6379> spop username 
+iceymos3
+127.0.0.1:6379> spop username 
+iceymos1
+127.0.0.1:6379> smembers username
+[
+    "iceymos2"
+]
+
+# smove将一个指定的值，移动到另一个set集合中
+127.0.0.1:6379> smembers username
+[
+    "iceymos2",
+    "dkfj",
+    "iceymoss1",
+    "iceymoss2",
+    "iceymoss4",
+    "iceymoss3"
+]
+127.0.0.1:6379> sadd username1 "yauso"
+1
+127.0.0.1:6379> smembers usernam1
+[]
+127.0.0.1:6379> smembers username1
+[
+    "yauso"
+]
+127.0.0.1:6379> smove username username1 "dkfj"
+1
+127.0.0.1:6379> smembers username1
+[
+    "yauso",
+    "dkfj"
+]
+
+# 数字集合类：(例如抖音B站：共同关注功能)
+- 差集
+- 交集
+- 并集
+127.0.0.1:6379> smembers user1_star
+[
+    "汤姆老师",
+    "英雄联盟解说",
+    "法外狂徒",
+    "影视飓风",
+    "kuangsheng",
+    "偶像练习生蔡徐坤"
+]
+127.0.0.1:6379> smembers user2_star
+[
+    "lpl赛事",
+    "罗翔说刑法",
+    "汤姆老师",
+    "偶像练习生蔡徐坤"
+]
+
+# sinter交集，两个用户的共同关注
+127.0.0.1:6379> sinter user1_star user2_star
+[
+    "汤姆老师",
+    "偶像练习生蔡徐坤"
+]
+
+# sunion并集
+127.0.0.1:6379>  sunion user1_star user2_star
+[
+    "罗翔说刑法",
+    "汤姆老师",
+    "法外狂徒",
+    "lpl赛事",
+    "kuangsheng",
+    "英雄联盟解说",
+    "偶像练习生蔡徐坤",
+    "影视飓风"
+]
+
+# sdiff差集 业务场景：抖音推荐对方还关注了(对方关注了，你没关注，即差集)
+127.0.0.1:6379> sdiff user1_star user2_star
+[
+    "影视飓风",
+    "kuangsheng",
+    "英雄联盟解说",
+    "法外狂徒"
+]
+
+```
+
+微博，A用户将所有关注的人放在一个set集合中！将它的粉丝也放在一个集合中！共同关注，共同爱好，二度好友，推荐好友（六度分割理论）
+
+
+
+## 散列(Hashes)
+
+map集合，key-value相信学过任何一门编程语言的人都这个map
+
+```sh
+# hset设置hashe
+127.0.0.1:6379> hset user name "iceymoss"
+1
+
+# hget获取值
+127.0.0.1:6379> hget user1 name
+dkfiel
+
+# hmset设置hashe多个属性
+127.0.0.1:6379> hmset userinfo name "iceymoss" age 18 gender "男"
+OK
+
+# hmget设置hashe多个属性
+127.0.0.1:6379> hmget userinfo name age gender
+[
+    "iceymoss",
+    "18",
+    "男"
+]
+
+# 获取hashe的所有key-value
+127.0.0.1:6379> hgetall userinfo
+{
+    "name": "iceymoss",
+    "age": "18",
+    "gender": "男"
+}
+
+# 删除hashe指定key，对应的value也就删除了
+127.0.0.1:6379> hgetall userinfo
+{
+    "name": "iceymoss",
+    "age": "18",
+    "gender": "男"
+}
+127.0.0.1:6379> hdel userinfo gender
+1
+127.0.0.1:6379> hgetall userinfo
+{
+    "name": "iceymoss",
+    "age": "18"
+}
+127.0.0.1:6379> 
+
+# hlen查看hashe的key数量
+127.0.0.1:6379> hlen userinfo
+2
+
+# hexists判断hashe的某个key是否存在
+127.0.0.1:6379> hexists userinfo name
+1  #返回1表示存在，0不在
+
+# hkeys返回所有key
+127.0.0.1:6379> hkeys userinfo
+[
+    "name",
+    "age"
+]
+
+# hvals返回所有value
+127.0.0.1:6379> hvals userinfo
+[
+    "iceymoss",
+    "18"
+]
+127.0.0.1:6379> 
+
+# hincrby给hash某个字段指定增量
+127.0.0.1:6379> hincrby userinfo age 1
+19
+127.0.0.1:6379> 
+127.0.0.1:6379> hincrby userinfo age 1
+20
+127.0.0.1:6379> hincrby userinfo age 1
+21
+127.0.0.1:6379> hincrby userinfo age 1
+22
+127.0.0.1:6379> hincrby userinfo age 1
+23
+127.0.0.1:6379> hincrby userinfo age 1
+24
+127.0.0.1:6379> hgetall userinfo
+{
+    "name": "iceymoss",
+    "age": "24"
+}
+
+# hsetnx判断hash某个字段是否存在，不存在则可以设置，存在则不可以设置（应用分布式锁）
+127.0.0.1:6379> hgetall userinfo
+{
+    "name": "iceymoss",
+    "age": "24"
+}
+127.0.0.1:6379> hsetnx userinfo gender "男"
+1
+127.0.0.1:6379> hsetnx userinfo gender "男"
+0
+127.0.0.1:6379> hgetall userinfo
+{
+    "name": "iceymoss",
+    "age": "24",
+    "gender": "男"
+}
+```
+
+hash变更的数据user name age，尤其是用户信息之类的，经常变动的信息！hash更适合对象的存储
+
+
+
+## 有序集合(Zset)
+
+有序集合
+
+在set的基础上，增加了一个值我们可以理解为权值，对比：sadd myset hello，zadd myzset 1 hello
+
+所有zset的命令都是以z开头的
+
+```sh
+# zadd添加元素
+127.0.0.1:6379> zadd myzset 1 chinese
+1
+127.0.0.1:6379> zadd myzset 2 math
+
+# zrange获取有序集合所有元素
+127.0.0.1:6379> zrange myzset 0 -1
+[
+    "chinese",
+    "math"
+]
+
+# 排序
+127.0.0.1:6379> zadd salary 2500 xiaohong
+(integer) 1
+127.0.0.1:6379> zadd salary 5000 zhangsan
+(integer) 1
+127.0.0.1:6379> zadd salary 500 xiaoming
+(integer) 1
+
+# 升序排序 从小到大
+127.0.0.1:6379> ZRANGEBYSCORE salary -inf +inf
+1) "xiaoming"
+2) "xiaohong"
+3) "zhangsan"
+
+# 升序排序带参数
+127.0.0.1:6379> ZRANGEBYSCORE salary -inf +inf withscores
+1) "xiaoming"
+2) "500"
+3) "xiaohong"
+4) "2500"
+5) "zhangsan"
+6) "5000"
+
+# 从负无穷到2500进行排序并且附带参数
+127.0.0.1:6379> ZRANGEBYSCORE salary -inf 2500 withscores
+1) "xiaoming"
+2) "500"
+3) "xiaohong"
+4) "2500"
+
+# 降序排序，从大到小
+127.0.0.1:6379> ZREVRANGE salary 0 -1
+1) "zhangsan"
+2) "xiaohong"
+127.0.0.1:6379> ZREVRANGE salary 0 -1 withscores
+1) "zhangsan"
+2) "5000"
+3) "xiaohong"
+4) "2500"
+
+# zrem移除元素
+127.0.0.1:6379> ZRANGE salary 0 -1
+1) "xiaoming"
+2) "xiaohong"
+3) "zhangsan"
+127.0.0.1:6379> zrem salary xiaoming
+(integer) 1
+127.0.0.1:6379> ZRANGE salary 0 -1
+1) "xiaohong"
+2) "zhangsan"
+
+# 获取有序集合中的个数
+127.0.0.1:6379> zcard salary
+(integer) 2
+
+# 获取集合不同区间中的个数
+127.0.0.1:6379> zcount myzset 1 2
+(integer) 2
+127.0.0.1:6379> zcount myzset 1 2
+(integer) 2
+127.0.0.1:6379> zcount myzset 1 3
+(integer) 3
+127.0.0.1:6379> zcount myzset 1 4
+(integer) 3
+127.0.0.1:6379> zcount myzset 0 4
+(integer) 3
+```
+
+业务场景: 薪资排序，排序榜等
+
+普通消息：1，重要消息：2 带权重进行判断
 
 ## 未完待续
-
 ……
 
 ## 参考文献
