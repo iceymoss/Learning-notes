@@ -720,7 +720,575 @@ hash变更的数据user name age，尤其是用户信息之类的，经常变动
 
 普通消息：1，重要消息：2 带权重进行判断
 
+
+
+## Redis的三种特殊数据类型
+
+### geospatial 地理位置存储
+
+用于存储地理数据，而redis可以使用我们的业务场景中更方便的去使用该数据类型做，用户的定位、位置计算、网约车车费计算，查询附近的人等很多场景。
+
+#### getadd
+
+> 用于添加地理位置
+
+需要注意一下几点：
+
+* 两级无法直接添加，大量数据可以直接通过相关程序一次性导入
+* 当经纬度超出一定范围时，会报超范围错误
+
+实例：
+
+```sh
+127.0.0.1:6379> geoadd china:city 116.40 39.90 beijing
+(integer) 1
+127.0.0.1:6379> geoadd china:city 121.47 31.23 shanghai
+(integer) 1
+127.0.0.1:6379> geoadd china:city 106.50 29.53 chongqing 114.05 22.52 shenzhen
+(integer) 2
+127.0.0.1:6379> geoadd china:city 120.16 30.24 hangzhou
+(integer) 1
+127.0.0.1:6379> geoadd china:city 108.96 34.26 xian
+```
+
+
+
+#### geopos
+
+> 获取地理位置
+
+实例：
+
+```sh
+127.0.0.1:6379> geopos china:city beijing
+1) 1) "116.39999896287918091"
+   2) "39.90000009167092543"
+127.0.0.1:6379> geopos china:city beijing shanghai
+1) 1) "116.39999896287918091"
+   2) "39.90000009167092543"
+2) 1) "121.47000163793563843"
+   2) "31.22999903975783553"
+```
+
+
+
+#### geodist
+
+> 获取给定的两个位置之间的直线距离
+
+- m：米
+- km：千米
+- mi：英里
+- ft：英尺
+
+实例：
+
+```sh
+# 查看两个城市之间的距离
+127.0.0.1:6379> geodist china:city beijing shanghai
+"1067378.7564"
+127.0.0.1:6379> geodist china:city beijing shanghai km  #以km为单位
+"1067.3788"
+```
+
+
+
+#### georadius
+
+> 给给定的一个坐标为中心，返回某个半径内的元素的值，业务场景：附近的人，附近车辆等。
+
+实例：
+
+```sh
+# 找出110 30为中心 500 km半径内的元素
+127.0.0.1:6379> georadius china:city 110 30 500 km
+1) "chongqing"
+2) "xian
+
+# 显示直线距离
+127.0.0.1:6379> georadius china:city 110 30 500 km withdist
+1) 1) "chongqing"
+   2) "341.9374"
+2) 1) "xian"
+   2) "483.8340"
+
+127.0.0.1:6379> georadius china:city 110 30 500 km withdist withcoord
+1) 1) "chongqing"
+   2) "341.9374"
+   3) 1) "106.49999767541885376"
+      2) "29.52999957900659211"
+2) 1) "xian"
+   2) "483.8340"
+   3) 1) "108.96000176668167114"
+      2) "34.25999964418929977"
+      
+# 指定获得数量
+127.0.0.1:6379> georadius china:city 110 30 500 km withdist withcoord count 1
+1) 1) "chongqing"
+   2) "341.9374"
+   3) 1) "106.49999767541885376"
+      2) "29.52999957900659211"
+```
+
+
+
+#### georadiusbymember
+
+> 以地点名称为中心查询，查询指定半径内的的元素
+
+实例：
+
+```sh
+127.0.0.1:6379>  GEORADIUSBYMEMBER china:city shanghai 2000 km
+[
+    "chongqing",
+    "xian",
+    "shenzhen",
+    "hangzhou",
+    "shanghai",
+    "beijing"
+]
+```
+
+
+
+#### geohash
+
+>geohash 返回一个或多个位置元素的geohash表示，使用该命令将返回11 个字符串的geohash字符串
+
+实例：
+
+```sh
+127.0.0.1:6379> geohash china:city beijing shenzhen
+[
+    "wx4fbxxfke0",
+    "ws10578st80"
+]
+```
+
+在Redis的五大基础数据类型学完后，其实geo的底层就是使用Zset进行封装的，下面我们来使用Zset命令操作地理数据
+
+实例：
+
+```bash
+127.0.0.1:6379> zrange china:city 0 -1  #查看所有数据
+[
+    "chongqing",
+    "xian",
+    "shenzhen",
+    "hangzhou",
+    "shanghai",
+    "beijing"
+]
+
+127.0.0.1:6379>  zrem china:city xian  #移除西安
+1
+127.0.0.1:6379> zrange china:city 0 -1
+[
+    "chongqing",
+    "shenzhen",
+    "hangzhou",
+    "shanghai",
+    "beijing"
+]
+```
+
+
+
+### hyperloglogs 基数存储
+
+> Ps: 这里需要先介绍一下基数，将一个系列的容器中，去重后的元素个数。
+>
+> 例如：{1, 2, 2, 5, 7, 7, 8, 12, 34} 原来总数为：9，基数：7
+
+hyperloglogs是Redis统计基数的算法，有优点是：占用内存固定，2^64不同元素，只需要2KB的内存，从内存的角度来说使用hyperloglogs是很好的。
+
+##### 使用场景
+
+> 统计网站的访问量，每一个设备只能访问计数一次，多次访问都是一次。
+
+传统的方式，set保存用户的id，然后就可以统计set中的元素数量作为标准判断
+
+这个方式如果保存大量的用户id，就会比较麻烦，我们的目的是为了计数，而不是保存用户id
+
+但是需要注意：
+
+* 0.81%错误率！统计任务，可以忽略不计的
+
+实例：
+
+```bash
+# 添加一个hyperloglog ，重复则替换
+127.0.0.1:6379> pfadd key1 a b c d e f g
+1
+
+# 统计一个key1中有多少元素
+127.0.0.1:6379>  PFCOUNT key1
+7
+127.0.0.1:6379>  pfadd key2 a b c d e f g h i j k l m n
+1
+127.0.0.1:6379> PFCOUNT key2
+14
+
+# 合并两个hyperloglog，求并集
+127.0.0.1:6379> PFMERGE mykey key1 key2
+OK
+127.0.0.1:6379> PFCOUNT mykey
+14
+127.0.0.1:6379> 
+```
+
+
+
+### bitmaps 位存储
+
+Bitmaps位图，数据结构！都是操作二进制位来进行记录，只有0和1两个状态！常见的使用场景：用户信息，活跃or不活跃，在线or不在线等等。
+
+实例：
+
+使用bitmaps来记录周一到周日的打卡情况：1打卡；0未打卡
+
+>周一(0): 1;周二(1): 0;周三(2): 1;周四(3): 0;周五(4): 1;周六(5): 1;周日(6): 1   ps：你看你什么成分还想周末休息，赶紧加班吧！(狗头)
+
+```bash
+# 某员工打卡情况
+127.0.0.1:6379> setbit sign 0 1
+0
+127.0.0.1:6379> setbit sign 1 0
+0
+127.0.0.1:6379> setbit sign 2 1
+0
+127.0.0.1:6379> setbit sign 3 0
+0
+127.0.0.1:6379> setbit sign 4 1
+0
+127.0.0.1:6379> setbit sign 5 1
+0
+127.0.0.1:6379> setbit sign 6 1
+0
+
+# 老板心情好查看一下某员工的打卡情况
+# 查看对应存的值
+127.0.0.1:6379> getbit sign 2
+1
+# 周四忘打卡，拿不到全勤奖金了！
+127.0.0.1:6379> getbit sign 3
+0
+
+# 统计打开天数
+127.0.0.1:6379> bitcount sign
+5
+```
+
+
+
+## 事务
+
+我们在学关系型数据库的时候都学过事务，以及事务的几大特性(ACID)，以及隔离级别等。
+
+Redis的事务本质：**一组命令的集合** 一个事务中的所有命令都会被序列化，在事务执行过程中，会按照命令的顺序执行。
+
+Redis事务的特性：
+
+* 一次性
+
+* 顺序性
+
+* 排他性
+
+  ```
+  队列queue： set set set set get set 执行
+  ```
+
+**注意：redis单条命令是保证原子性的，但是Redis的事务是不保证原子性的，Redis也是没有隔离级别的。**
+
+当开启事务后，所有的命令都会放入队列中，不会别直接执行的，只有发起执行命令的时候才会执行！```exec```
+
+Redis的事务命令：
+
+* 开始事务：(``multi``)
+* 命令入队(……)
+* 执行事务(`exec`)
+
+
+
+#### 正常事务的开启执行
+
+实例：
+
+```bash
+127.0.0.1:6379> multi  #开启事务
+OK
+127.0.0.1:6379> set k1 v1    #命令入队
+QUEUED
+127.0.0.1:6379> set k2 v2    #命令入队
+QUEUED
+127.0.0.1:6379> get k2       #命令入队
+QUEUED
+127.0.0.1:6379> set k3 v3    #命令入队
+QUEUED
+127.0.0.1:6379> exec         #执行事务
+[
+    "OK",
+    "OK",
+    "v2",
+    "OK"
+]
+```
+
+
+
+#### 放弃事务(discard)
+
+当我们开启事务后然后不想执行当前事务，使用```discard```命令放弃事务
+
+实例：
+
+```bash
+127.0.0.1:6379> multi     #开启事务
+OK
+127.0.0.1:6379> set k1 v1   
+QUEUED
+127.0.0.1:6379> set k2 v2
+QUEUED
+127.0.0.1:6379> get k1
+QUEUED
+127.0.0.1:6379> discard   #放弃事务
+OK
+127.0.0.1:6379> set k1 v1
+OK
+127.0.0.1:6379> get k1
+v1
+```
+
+#### 两大异常
+
+##### 编译型异常
+
+编译型异常指代码有问题！命令错误！在事务中所有的命令都不会被执行！不会别编译过去！
+
+实例：
+
+```bash
+127.0.0.1:6379> multi   #开启事务
+OK
+127.0.0.1:6379> set k1 v1
+QUEUED
+127.0.0.1:6379> set k2 v2
+QUEUED
+127.0.0.1:6379> getset k2   #写入一个错误命令，直接报错
+ERR wrong number of arguments for 'getset' command
+127.0.0.1:6379> set k4 v4   #继续向事务队列中写入命令
+QUEUED
+127.0.0.1:6379> exec        #执行事务，此时所有命令都不会被执行
+EXECABORT Transaction discarded because of previous errors.
+```
+
+
+
+##### 运行时异常
+
+运行时异常指，给出命令没有问题，例如1/0，那么在执行命令的时候其他没有问题的命令是可以正常执行的，错误命令抛出异常！
+
+实例：
+
+```sh
+127.0.0.1:6379> multi
+OK
+127.0.0.1:6379> get k1
+QUEUED
+127.0.0.1:6379> set k2 v2
+QUEUED
+127.0.0.1:6379> set k3 v3
+QUEUED
+127.0.0.1:6379> exec
+Cannot read properties of null (reading 'type')  #这里会报错，但是可以正常获取其他值
+127.0.0.1:6379> get k1    #没有k1
+(nil)
+127.0.0.1:6379> get k2    #有k2
+v2
+```
+
+
+
+## 监控(watch )
+
+### 锁
+
+#### 悲观锁
+
+悲观锁可以理解为做什么事都以一种悲观的态度，认为事情总会发生，就是指在任何情况下都加锁。
+
+
+
+#### 乐观锁
+
+很乐观，认为什么情况下都不会发生，持乐观态度，所以不会上锁，更新的时候去去检查在此期间(指从查询到数据->更新数据之间)操作的数据在数据库有没有被更新过，字段version。
+
+步骤：
+
+* 获取verison
+* 更新数据的时候比较version
+
+#### 基于Redis的乐观锁
+
+##### 使用watch开启监视
+
+**使用watch开启监视(获取version)，需要注意的是，在监控期间数据没有发生变动的时候事务才能正常执行成功，如果失败了，也需要使用unwatch解除监控。**
+
+假设你和你女朋友一共有一百块钱money = 100去消费，那么的消费情况刚开始out = 0
+
+
+
+**模拟单线程情况下：**
+
+```bash
+127.0.0.1:6379> set money  100
+OK
+127.0.0.1:6379> set out 0
+ok
+
+# 监控money对象
+127.0.0.1:6379> watch money 
+ok
+
+# 期间数据没有发生变动，这时候就正常执行成功
+# 开启事务
+127.0.0.1:6379> multi
+OK
+127.0.0.1:6379> decrby money 20
+QUEUED
+127.0.0.1:6379> incrby out 20
+QUEUED
+
+# 执行事务
+127.0.0.1:6379> exec
+[
+    80,
+    20
+]
+```
+
+
+
+**模拟多线程情况下：**
+
+线程1执行：
+
+```bash
+127.0.0.1:6379> watch money
+OK
+127.0.0.1:6379> multi
+OK
+127.0.0.1:6379> decrby money 20
+QUEUED
+127.0.0.1:6379> incrby out 20
+QUEUED
+127.0.0.1:6379> exec
+(nil)
+127.0.0.1:6379> get money
+```
+
+线程2突然进来执行：
+
+```go
+127.0.0.1:6379> get money
+100
+127.0.0.1:6379> set money 200
+OK
+127.0.0.1:6379> 
+```
+
+然后回到线程1执行：
+
+```bash
+127.0.0.1:6379> exec
+(nil)
+```
+
+我们的线程1的事务就执行失败了，此时的money = 200。
+
+那么为什么线程1的事务会执行失败呢？答案：watch是Redis的乐观锁，线程1获取到version后，线程2执行了对数据库的更该，线程1在执行事务时(更新数据)发现前后的version值不想同，进而导致失败。
+
+注意：如果发现事务失败后，需要解除监控，从新监控获取最新值。
+
+
+
+## Go-Redis
+
+### Go-Redis是什么？
+
+Go-Redis是支持Redis Server和Redis Cluster的Golang客户端，接下来我们要使用golang来操作Redis。
+
+#### 多种客户端
+
+支持单机Redis Server、Redis Cluster、Redis Sentinel、Redis分片服务器
+
+#### 数据类型
+
+go-redis会根据不同的redis命令处理成指定的数据类型，不必进行繁琐的数据类型转换
+
+#### 功能完善
+
+go-redis支持管道(pipeline)、事务、pub/sub、Lua脚本、mock、分布式锁等功能
+
+#### 安装
+
+直接使用命令安装，前提是您的设备已经配置了golang的开发环境。
+
+[go-redis 支持 2 个最新的 Go 版本，并且需要具有模块](https://github.com/golang/go/wiki/Modules)支持的 Go 版本 。所以一定要初始化一个 Go 模块：
+
+```
+go mod init github.com/my/repo
+```
+
+然后安装 go-redis/ **v9**：
+
+```
+go get github.com/redis/go-redis/v9
+```
+
+
+
+#### 快速使用
+
+```go
+package main
+
+import (
+  "fmt"
+	"time"
+	"context"
+ 
+  "github.com/redis/go-redis/v9"
+)
+
+func main() {
+	rdb := redis.NewClient(&redis.Options{
+		Addr:     "localhost:6379",
+		Password: "", // no password set
+		DB:       0,  // use default DB
+	})
+
+	rdb.Ping(context.Background())
+
+	status := rdb.Set(context.Background(), "money", 1000, time.Second*100)
+	if status.Err() != nil {
+		panic(status.Err())
+	}
+
+	res := rdb.Get(context.Background(), "money")
+	if res.Err() != nil {
+		panic(res.Err())
+	}
+	fmt.Println(res.Val())
+}
+```
+
+
+
 ## 未完待续
+
 ……
 
 ## 参考文献
