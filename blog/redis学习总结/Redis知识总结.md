@@ -1234,6 +1234,8 @@ go-redis支持管道(pipeline)、事务、pub/sub、Lua脚本、mock、分布式
 
 #### 安装
 
+开源地址：https://github.com/redis/go-redis
+
 直接使用命令安装，前提是您的设备已经配置了golang的开发环境。
 
 [go-redis 支持 2 个最新的 Go 版本，并且需要具有模块](https://github.com/golang/go/wiki/Modules)支持的 Go 版本 。所以一定要初始化一个 Go 模块：
@@ -1247,8 +1249,6 @@ go mod init github.com/my/repo
 ```
 go get github.com/redis/go-redis/v9
 ```
-
-
 
 #### 快速使用
 
@@ -1269,7 +1269,9 @@ func main() {
 		Password: "", // no password set
 		DB:       0,  // use default DB
 	})
-
+  
+	defer rdb.Close()
+  
 	rdb.Ping(context.Background())
 
 	status := rdb.Set(context.Background(), "money", 1000, time.Second*100)
@@ -1287,6 +1289,613 @@ func main() {
 
 
 
+我们在前面使用的命令都封装在go-redis中是一个一个的方法，可以参考go-redis:https://github.com/redis/go-redis/blob/master/commands.go#L158
+
+下面将介绍go-redis的一些常用方法：
+
+```go
+//go-redis需要接收一个上下文
+ctx := context.Background()
+
+	//清空数据库
+	rdb.FlushAll(ctx)
+	rdb.FlushDB(ctx)
+
+	//判断是否存在key
+	rdb.Exists(ctx, "username")
+
+	//设置key
+	rdb.Set(ctx, "username", "iceymoss", time.Hour*24*30)
+	rdb.Set(ctx, "password", "123456", time.Hour*24*30)
+
+	//获取key
+	rdb.Get(ctx, "username").Val()
+	rdb.Get(ctx, "password").Val()
+	
+	//删除key
+	rdb.Del(ctx, "username")
+	rdb.Del(ctx, "password")
+
+	//获取key类型
+	rdb.Type(ctx, "username")
+	
+	//随机获取一个key
+	rdb.RandomKey(ctx)
+
+	//重命名key
+	rdb.Rename(ctx, "username", "name")
+	rdb.Get(ctx, "name")
+	
+	//返回key的总数
+	rdb.DBSize(ctx)
+```
+
+下面将给出几大类型的方法，具体实例就展开了
+
+#### 操作string的方法
+
+- Get   获取值
+- Set   设置key
+- GetSet  设置一个key的值，并返回这个key的旧值:
+- SetNX  如果key不存在，则设置这个key
+- MGet  批量获取
+- MSet   批量设置key
+- Incr,IncrBy  自增1，自增指定长
+- Decr,DecrBy  自减，自减指定长
+- Del   删除key
+- Expire  设置过期时间
+
+
+
+#### 操作list的方法
+
+-  LPush  从list左插入
+
+-  LPushX  跟LPush的区别是，仅当列表存在的时候才插入数据,用法完全一样。
+
+- RPop 从list移除第一个元素，并返回
+
+- RPush  从list右插入
+
+- RPushX  跟RPush的区别是，仅当列表存在的时候才插入数据,用法完全一样。
+
+- LPop  从list左边移出第一个元素并返回
+
+- LLen 返回list大小
+
+- LRange  返回列表的一个范围内的数据，也可以返回全部数据
+
+- LRem 删除列表中的数据
+
+  ```go
+  // 从列表左边开始，删除100， 如果出现重复元素，仅删除1次，也就是删除第一个
+  dels, err := rdb.LRem(ctx,"key",1,100).Result()
+  if err != nil {
+  	panic(err)
+  }
+  ```
+
+* LIndex  根据索引坐标，查询列表中的数据
+
+- LInsert  根据指定位置向list插入元素
+
+
+
+#### 操作Hasha的方法
+
+**内部采用数组+链表结构，采用链地址法解决哈希冲突。**
+
+- HSet  根据key和field字段设置，field字段的值
+
+  ```go
+  // user_1 是hash key，username 是字段名, zhangsan是字段值
+  err := rdb.HSet(ctx,"user_1", "username", "zhangsan").Err()
+  if err != nil {
+  	panic(err)
+  }
+  ```
+
+- HGet  根据key和field字段获取field的值
+
+  ```go
+  // user_1 是hash key，username是字段名
+  username, err := rdb.HGet(ctx,"user_1", "username").Result()
+  if err != nil {
+  	panic(err)
+  }
+  fmt.Println(username)
+  ```
+
+- HGetAll  根据根据key查询所有字段
+
+  ```go
+  // 一次性返回key=user_1的所有hash字段和值
+  data, err := rdb.HGetAll(ctx,"user_1").Result()
+  if err != nil {
+  	panic(err)
+  }
+  
+  // data是一个map类型，这里使用使用循环迭代输出
+  for field, val := range data {
+  	fmt.Println(field,val)
+  }
+  ```
+
+- HIncrBy  根据key和field字段，累加字段的数值
+
+- HKeys  根据key返回所有字段名
+
+- HLen 根据key，查询hash的字段数量
+
+- HMGet 根据key和多个字段获取多个字段值
+
+- HMSet  根据key和多个字段名和字段值，批量设置hash字段值
+
+- HSetNX  如果key不存在则创建
+
+  ```go
+  err := rdb.HSetNX(ctx,"key", "id", 100).Err()
+  if err != nil {
+  	panic(err)
+  }
+  ```
+
+- HDel 根据key和字段名，删除hash字段，支持批量删除hash字段
+
+  ```go
+  // 删除一个字段id
+  rdb.HDel(ctx,"key", "id")
+  
+  // 删除多个字段
+  rdb.HDel(ctx,"key", "id", "username")
+  
+  ```
+
+- HExists  检测hash字段名是否存在
+
+  ```go
+  // 检测id字段是否存在
+  err := rdb.HExists(ctx,"key", "id").Err()
+  if err != nil {
+  	panic(err)
+  }
+  ```
+
+  
+
+#### 操作set的方法
+
+* SAdd 向集合中添加元素
+
+  ```go
+  // 添加100到集合中
+  err := rdb.SAdd(ctx,"key",100).Err()
+  if err != nil {
+  	panic(err)
+  }
+  
+  // 将100,200,300添加到集合中
+  rdb.SAdd(ctx,"key",100, 200, 300)
+  ```
+
+* SCard 获取集合元素个数
+* SIsMember 判断是否在集合中
+* SMembers 获取集合中的所有元素
+* SRem 删除集合所有元素
+* Spop, SpopN 随机返回集合中的元素，并且删除返回的元素
+
+
+
+#### 操作Zset的方法
+
+* ZAdd  向有序集合中添加元素
+
+* ZCard  获取有序集合的元素个数
+
+* ZCount  根据权重统计范围
+
+* ZIncrBy  增加元素的分数
+
+* ZRange,ZRevRange  返回集合中某个索引范围的元素，根据分数从小到大排序
+
+* ZRangeByScore  根据分数范围返回集合元素，元素根据分数从小到大排序，支持分页。
+
+* ZRevRangeByScore  用法类似ZRangeByScore，区别是元素根据分数从大到小排序。
+
+* ZRangeByScoreWithScores  用法跟ZRangeByScore一样，区别是除了返回集合元素，同时也返回元素对应的分数
+
+* ZRem  删除集合元素
+
+* ZRemRangeByRank  根据索引范围删除元素
+
+* ZRemRangeByScore  根据分数范围删除元素
+
+* ZScore  查询元素对应的分数
+
+* ZRank  根据元素名，查询集合元素在集合中的排名，从0开始算，集合元素按分数从小到大排序
+
+
+
+#### 其他操作
+
+##### geospatial
+
+```go
+	GeoAdd(ctx context.Context, key string, geoLocation ...*GeoLocation) *IntCmd
+	GeoPos(ctx context.Context, key string, members ...string) *GeoPosCmd
+	GeoRadius(ctx context.Context, key string, longitude, latitude float64, query *GeoRadiusQuery) *GeoLocationCmd
+	GeoRadiusStore(ctx context.Context, key string, longitude, latitude float64, query *GeoRadiusQuery) *IntCmd
+	GeoRadiusByMember(ctx context.Context, key, member string, query *GeoRadiusQuery) *GeoLocationCmd
+	GeoRadiusByMemberStore(ctx context.Context, key, member string, query *GeoRadiusQuery) *IntCmd
+	GeoSearch(ctx context.Context, key string, q *GeoSearchQuery) *StringSliceCmd
+	GeoSearchLocation(ctx context.Context, key string, q *GeoSearchLocationQuery) *GeoSearchLocationCmd
+	GeoSearchStore(ctx context.Context, key, store string, q *GeoSearchStoreQuery) *IntCmd
+	GeoDist(ctx context.Context, key string, member1, member2, unit string) *FloatCmd
+	GeoHash(ctx context.Context, key string, members ...string) *StringSliceCmd
+```
+
+
+
+##### hyperloglogs
+
+```go
+PFAdd(ctx context.Context, key string, els ...interface{}) *IntCmd
+PFCount(ctx context.Context, keys ...string) *IntCmd
+PFMerge(ctx context.Context, dest string, keys ...string) *StatusCmd
+……
+……
+……
+```
+
+​	
+
+##### bitmaps
+
+```
+SetBit(ctx context.Context, key string, offset int64, value int) *IntCmd
+GetBit(ctx context.Context, key string, offset int64) *IntCmd
+BitCount(ctx context.Context, key string, bitCount *BitCount) *IntCmd
+……
+……
+……
+```
+
+
+
+#### go-redis完成事务
+
+假设我们有money = 100, 去消费，刚开开始out = 0
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"github.com/redis/go-redis/v9"
+	"time"
+)
+
+func main() {
+	rdb := redis.NewClient(&redis.Options{
+		Addr:     "localhost:6379",
+		Password: "", // no password set
+		DB:       0,  // use default DB
+	})
+
+	ctx := context.Background()
+	defer rdb.Close()
+
+	rdb.Set(ctx, "money", 100, time.Hour*24*30)
+	rdb.Set(ctx, "out", 0, time.Hour*24*30)
+
+	//开启一个事务
+	multi := rdb.TxPipeline()
+
+	//消费20元
+	dec := rdb.DecrBy(ctx, "money", 20)
+	//执行失败取消事务
+	if dec.Err() != nil {
+		multi.Discard()
+		return
+	}
+	inc := rdb.IncrBy(ctx, "out", 20)
+	if inc.Err() != nil {
+		multi.Discard()
+		return
+	}
+
+  //执行事务
+	multi.Exec(ctx)
+
+	fmt.Println(rdb.Get(ctx, "money").Val())
+	fmt.Println(rdb.Get(ctx, "out").Val())
+}
+```
+
+输出：
+
+```
+80
+20
+```
+
+
+
+当消费超出本金后，需要取消事务：
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"github.com/redis/go-redis/v9"
+	"strconv"
+	"time"
+)
+
+func main() {
+	rdb := redis.NewClient(&redis.Options{
+		Addr:     "localhost:6379",
+		Password: "", // no password set
+		DB:       0,  // use default DB
+	})
+
+	ctx := context.Background()
+	defer rdb.Close()
+
+	rdb.Set(ctx, "money", 100, time.Hour*24*30)
+	rdb.Set(ctx, "out", 0, time.Hour*24*30)
+
+	//开启一个事务
+	multi := rdb.TxPipeline()
+
+	wantOut := 120
+	money, _ := strconv.Atoi(rdb.Get(ctx, "out").Val())
+	if money < wantOut {
+		multi.Discard()
+		return
+	}
+
+	//消费20元
+	dec := rdb.DecrBy(ctx, "money", int64(wantOut))
+	//执行失败取消事务
+	if dec.Err() != nil {
+		multi.Discard()
+		return
+	}
+	inc := rdb.IncrBy(ctx, "out", int64(wantOut))
+	if inc.Err() != nil {
+		multi.Discard()
+		return
+	}
+
+	multi.Exec(ctx)
+}
+```
+
+事务会被取消
+
+
+
+#### go-redis乐观锁
+
+```go
+ctx := context.Background()
+
+	// 定义一个回调函数，用于处理事务逻辑
+	fn := func(tx *redis.Tx) error {
+		// 先查询下当前watch监听的key的值
+		v, err := tx.Get(ctx, "key").Int()
+		if err != nil && err != redis.Nil {
+			return err
+		}
+		// 这里可以处理业务
+		v++
+
+		// 如果key的值没有改变的话，Pipelined函数才会调用成功
+		_, err = tx.Pipelined(ctx, func(pipe redis.Pipeliner) error {
+			// 在这里给key设置最新值
+			pipe.Set(ctx, "key", v, 0)
+			return nil
+		})
+		return err
+	}
+
+	// 使用Watch监听一些Key, 同时绑定一个回调函数fn, 监听Key后的逻辑写在fn这个回调函数里面
+	// 如果想监听多个key，可以这么写：client.Watch(ctx,fn, "key1", "key2", "key3")
+	rdb.Watch(ctx, fn, "key")
+```
+
+
+
+
+
+# Redis进阶
+
+
+
+## Redis.conf配置介绍
+
+* #### 单位
+
+  ```
+  # Note on units: when memory size is needed, it is possible to specify
+  # it in the usual form of 1k 5GB 4M and so forth:
+  #
+  # 1k => 1000 bytes
+  # 1kb => 1024 bytes
+  # 1m => 1000000 bytes
+  # 1mb => 1024*1024 bytes
+  # 1g => 1000000000 bytes
+  # 1gb => 1024*1024*1024 bytes
+  #
+  # units are case insensitive so 1GB 1Gb 1gB are all the same.
+  ```
+
+  配置文件对大小写不敏感
+
+  
+
+* #### redis配置文件可以有多个导入（可以配置多个文件)
+
+  ```
+  ################################## INCLUDES ###################################
+  
+  # Include one or more other config files here.  This is useful if you
+  # have a standard template that goes to all Redis servers but also need
+  # to customize a few per-server settings.  Include files can include
+  # other files, so use this wisely.
+  #
+  # Notice option "include" won't be rewritten by command "CONFIG REWRITE"
+  # from admin or Redis Sentinel. Since Redis always uses the last processed
+  # line as value of a configuration directive, you'd better put includes
+  # at the beginning of this file to avoid overwriting config change at runtime.
+  #
+  # If instead you are interested in using includes to override configuration
+  # options, it is better to use include as the last line.
+  #
+  # include /path/to/local.conf
+  # include /path/to/other.conf
+  ```
+
+  
+
+* #### 网络: 是否提供远程访问等
+
+  ```
+  ################################## NETWORK #####################################
+  
+  # By default, if no "bind" configuration directive is specified, Redis listens
+  # for connections from all the network interfaces available on the server.
+  # It is possible to listen to just one or multiple selected interfaces using
+  # the "bind" configuration directive, followed by one or more IP addresses.
+  #
+  # Examples:
+  #
+  # bind 192.168.1.100 10.0.0.1
+  # bind 127.0.0.1 ::1
+  ```
+
+  可以使用命令修改ip:
+
+  ```sh
+  bind 127.0.0.1 #绑定的ip
+  protected-mode yes #受保护模式
+  port 6379 #端口设置
+  ```
+
+
+
+* #### 通用配置
+
+  ```
+  ################################# GENERAL #####################################
+  
+  # By default Redis does not run as a daemon. Use 'yes' if you need it.
+  # Note that Redis will write a pid file in /var/run/redis.pid when daemonized.
+  ……
+  ……
+  ……
+  ```
+
+  相应的配置作用如下：
+
+  ```sh
+  daemonize yes # 以守护进程的方式运行，默认no，需要开启yes（允许后台运行）
+  pidfile /var/run/redis_6379.pid #如果以后台的方式运行，我们需要指定一个pid进程文件
+  loglevel notice #日志的级别
+  logfile "" #日志的文件位置名
+  databases 16 #默认的16个数据库，数据库的数量
+  always-show-logo yes #是否显示logo
+  ```
+
+  
+
+* #### 快照
+
+  持久化，在规定的时间内，执行了多少次操作，则会持久化到文件==.rbd==，==.aof==
+
+  redis是基于内存数据库，如果没有持久化，那么数据断电即失。
+
+  ```sh
+  save 900 1   #900s内，至少有一个key进行了修改，就进行持久化操作
+  save 300 10
+  save 60 10000
+  
+  stop-writes-on-bgsave-error yes  #持久化失败后，redis是否还要进行工作
+  
+  dbfilename dump.rdb #是否压缩rdb文件，需要消耗cpu资源
+  
+  rdbchecksum yes #保存reb文件的时候，进行检查修复rdb文件错误
+  
+  dir ./ #rdb文件保存位置
+  
+  
+  ```
+
+  
+
+* #### 主从复制
+
+  
+
+* #### 安全
+
+  密码，redis默认是没有密码的
+
+  ```
+  # requirepass foobared
+  ```
+
+  如果需要使用密码可直接在配置文件中进行修改：
+
+  ```
+  requirepass 123456
+  ```
+
+  ```sh
+  # 使用命令设置密码
+  config get requirepass #获取redis的密码
+  config set requirepass "123456" #设置redis密码
+  auth 123456 #使用密码登录，校验密码
+  ```
+
+* #### 客户端
+
+  ```sh
+  maxclients 10000 #设置能连接上redis的最大客户端的数量
+  maxmemory <bytes> #redis配置最大的内存容量
+  maxmemory-policy noeviction #内存到达上限之后的处理策略#移除一些过期的key#报错 
+      redis.conf中的默认的过期策略是 volatile-lru
+      maxmemory-policy 六种方式
+      1、volatile-lru：只对设置了过期时间的key进行LRU（默认值） 
+      2、allkeys-lru ： 删除lru算法的key   
+      3、volatile-random：随机删除即将过期key   
+      4、allkeys-random：随机删除   
+      5、volatile-ttl ： 删除即将过期的   
+      6、noeviction ： 永不过期，返回错误
+  ```
+
+  
+
+* #### aof配置（持久化配置）
+
+  ```sh
+  appendonly no #默认不开启aof模式，默认是使用rdb方式持久化，在大部分所有的情况下，rdb完全够用
+  appendfilename "appendonly.aof" #持久化的文件名字 
+  appendfsync always # 每次修改都会sync，消耗性能！
+  appendfsync everysec # 每秒执行一次sync，可能会丢失这1s的数据！
+  appendfsync no # 不执行sync同步，这个时候操作系统自己同步数据，速度最快！
+  ```
+
+  
+
+
+
+
+
 ## 未完待续
 
 ……
@@ -1294,4 +1903,6 @@ func main() {
 ## 参考文献
 
 [B站up主-狂神说Java](https://www.bilibili.com/video/BV1S54y1R7SB/?spm_id_from=333.999.0.0)
+
+[码神之路](https://www.mszlu.com/go/go-redis/02/02.html#_1-set)
 
