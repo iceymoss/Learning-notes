@@ -1892,15 +1892,172 @@ ctx := context.Background()
 
   
 
+## Redis持久化
+
+我们知道redis是基于内存的数据库，如果我们不将数据写入磁盘中，当计算机断电或者发生什么意外之后，进程关闭，我们之前的redis中的状态和数据就没有了，所以我们需要将必要数据进行持久化。
+
+### RDB(Redis DataBase)
+
+在指定的时间间隔内将redis所有数据集快照(副本)写入磁盘，也就是行话讲的Snapshot快照，它恢复时是将快照文件直接读到内存里。
+
+如下图：
+
+<img src="https://img-blog.csdnimg.cn/img_convert/4ee3203524c53279a9d9855ea6b797c6.png" style="zoom:40%;" />
+
+redis会单独创建（fork）一个子进程来进行持久化，会先将数据写入到一个临时文件中，带持久化过程都结束了，再用这个临时文件替换上次持久化好的文件。整个过程中，主进程是不进行任何IO操作的。这就确保了极高的性能。如果需要进行大规模数据的恢复，且对于数据恢复的完整性不是非常敏感，那rdb方式要比AOF方式更加高效。**rdb的缺点是最后一次持久化后的数据可能丢失。默认就是rdb，一般不需要修改这个配置**
+
+保存rdb文件是：dump.rdb
+
+在配置文件可以看到：
+
+```sh
+# The filename where to dump the DB
+dbfilename dump.rdb
+```
+
+持久化规则：我们可以在配置文件中修改参数，从而满足业务需求
+
+```sh
+save 900 1   #900s内，至少有一个key进行了修改，就进行持久化操作
+save 300 10
+save 60 10000
+```
 
 
 
+##### 触发机制
+
+* 在满足save条件下会自动触发rdb规则(生成rdb文件)
+* 执行flushall命令，也会触发rdb规则(生成rdb文件)
+* 退出redis，也会产生rdb文件！
+
+备份就会自动生成一个dump.rdb
+
+
+
+##### 修复rdb文件
+
+当我们进程不小心挂了，要如何快速恢复redis的数呢？
+
+* 将rdb文件放置redis启动目录之下即可，Redis会自动从该位置读取rdb文件
+
+* 如何查看Redis启动目录：
+
+  ```sh
+  127.0.0.1:6379> config get dir
+  1) "dir"
+  2) "usr/local/bin" # 如果这个目录下存在dump.rdb文件，启动就会自动恢复其中的数据
+  ```
+
+##### 优点
+
+* 将数据持久化是Redis进程fork的子进程完成的，所以主进程没有进行io操作，效率非常高，适合大量数据的恢复。
+* 使用者对数据的完整性不高，非常合适。
+
+##### 缺点
+
+* 最后一次持久化后的数据可能丢失。
+* fork出来的子进程需要占用cpu资源。
+
+
+
+### aof (append only file)
+
+aof是什么？答：直译追加文件的意思，aof的核心就是将执行的每一条命令记录下来，类似history，追加到文件中，当需要恢复数据时，直接将记录下来的所有命令从新执行一变即可。
+
+aof以日志的方式来记录每一个写操作，将Redis执行的所有命令记录下来(只对写操作进行记录)，只允许追加文件不可以修改文件，redis启动之初会读取该文件重新构建数据，换言之，redis重启的话就根据日志文件的内容将写指令从前到后执行一次以完成数据的恢复工作。
+
+工作流程如下：
+
+![](https://img-blog.csdnimg.cn/img_convert/3366d9b55d4cd45bf7f591932736dac5.png)
+
+##### 文件类型
+
+保存的是appendonly.aof文件
+
+##### 如何查看
+
+可以在Redis配置中查看，aof默认是不开启的，需要手动开启，改成：```appendonly yes```重启就可以生效了；默认aof文件名：appendonly.aof
+
+```sh
+# Please check http://redis.io/topics/persistence for more information.
+
+appendonly no
+
+# The name of the append only file (default: "appendonly.aof")
+
+appendfilename "appendonly.aof"
+```
+
+**注意：如果这个aof文件有错，这时候redis是启动不起来的。我们需要修复这个aof文件，redis给我们提供了一个工具`redis-check-aof --fix`**
+
+##### aof策略
+
+在配置文件中：
+
+```sh
+# appendfsync always
+appendfsync everysec
+# appendfsync no
+```
+
+##### 重写规则说明
+
+aof默认就是文件的无限追加，文件会越来越大
+
+##### 优点
+
+```sh
+appendfsync always # 每次修改都会sync，消耗性能！
+appendfsync everysec # 每秒执行一次sync，可能会丢失这1s的数据！
+appendfsync no # 不执行sync同步，这个时候操作系统自己同步数据，速度最快！
+```
+
+* 每一次修改都同步，文件的完整性会更加好！
+
+* 每秒同步一次，可能会丢失一秒的数据
+
+* 从不同步，效率最高的！
+
+##### 缺点
+
+* 相对于数据文件来说，aof远大于rdb，修复的速度也比rdb慢。
+
+* aof运行效率也要比rdb慢，所以redis默认的配置就是rdb持久化。
+* 
+
+### 拓展
+
+1、rdb持久化方式能够在指定的时间间隔内对你的数据进行快照存储
+
+2、aof持久化方式记录每次对服务器写的操作，当服务器重启的时候会重新执行这些命令来恢复原始的数据，aof命令以redis协议追加保存每次写的操作到文件末尾，redis还能对aof文件进行后台重写，使得aof文件的体积不至于过大。
+
+3、只做缓存，如果你只希望你的数据在服务器运行的时候存在，你也可以不使用任何持久化
+
+4、同时开启两种持久化方式
+
+- 在这种情况下，当redis重启的时候会优先载入aof文件来恢复原始的数据，因为在通常情况下aof文件保存的数据集要比rdb文件保存的数据集要完整
+- rdb的数据不实时，同时使用两者时服务器重启也只会找aof文件，那要不要只使用aof呢？作者建议不要，因为rdb更适合用于备份数据库（aof在不断变化不好备份），快速重启，而且不会有aof可能潜在的bug，留着作为一个万一的手段。
+
+5、性能建议
+
+- 因为rdb文件只用作后备用途，建议只在slave上持久化rdb文件，而且只要15分钟备份一次就够了，只保留save 900 1 这条规则。
+- 如果enable aof 好处是在最恶劣的情况下也只会丢失不超过两秒数据，启动脚本较简单只load自己的aof文件就可以了，代价一是带来了持续的IO，二是aof rewrite的最后将rewrite过程中产生的新数据写到新文件造成阻塞几乎是不可避免的。只要硬盘许可，应该尽量减少aof rewrite 的频率，aof重写的基础大小默认值64m太小了，可以设到5G以上，默认超过原大小100%大小重写可以改到适当的数值。
+- 如果不enable aof，仅靠master-slave repllcation 实现高可用性也可以，能省掉一大笔IO，也减少了rewrite时带来的系统波动。代价是如果master/slave同时倒掉，会丢失十几分钟的数据，启动脚本也要比较两个master/slave中的rdb文件，载入较新的那个，微博就是这种架构。
 
 ## 未完待续
 
 ……
 
-## 参考文献
+
+
+## 参考内容
+
+### 说明
+
+本文主要是在B站看了up主[B站up主-狂神说Java](https://www.bilibili.com/video/BV1S54y1R7SB/?spm_id_from=333.999.0.0)的redis课程来写的，所以很多的内容都是一边学一变进行记录并添加自己对相关知识的理解，课程中老师使用了java来对redis进行操作，由于本人对golang比较熟，不熟悉java，所以使用的是golang来操作redis。其中部分内容是在[码神之路](https://www.mszlu.com/go/go-redis/02/02.html#_1-set)作者的相关博客和官网文档做了参考，在这里首先要感谢狂神老师的教学，也感谢码神之路的文章做参考，希望大家可以对两位大佬进行关注和支持。
+
+### 参考
 
 [B站up主-狂神说Java](https://www.bilibili.com/video/BV1S54y1R7SB/?spm_id_from=333.999.0.0)
 
