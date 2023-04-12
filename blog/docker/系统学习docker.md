@@ -1037,3 +1037,306 @@ CMD ["/main"]
 
 添加到当前/App/目录下
 
+
+
+### 构建参数和环境变量
+
+我们先来看一下环境变量：
+
+```dockerfile
+FROM ubuntu:20.04
+RUN apt-get update && \
+    apt-get install -y wget && \
+    wget https://github.com/ipinfo/cli/releases/download/ipinfo-2.0.1/ipinfo_2.0.1_linux_amd64.tar.gz && \
+    tar zxf ipinfo_2.0.1_linux_amd64.tar.gz && \
+    mv ipinfo_2.0.1_linux_amd64 /usr/bin/ipinfo && \
+    rm -rf ipinfo_2.0.1_linux_amd64.tar.gz
+```
+
+我们可以看到有```RUN```中有很多版本好，如果要进行镜像升级的时候，岂不是每次都要进行修改，这很麻烦的。
+
+所以我们需要环境变量
+
+#### ENV
+
+```dockerfile
+FROM ubuntu:20.04
+ENV VERSION=2.0.1
+RUN apt-get update && \
+    apt-get install -y wget && \
+    wget https://github.com/ipinfo/cli/releases/download/ipinfo-${VERSION}/ipinfo_${VERSION}_linux_amd64.tar.gz && \
+    tar zxf ipinfo_${VERSION}_linux_amd64.tar.gz && \
+    mv ipinfo_${VERSION}_linux_amd64 /usr/bin/ipinfo && \
+    rm -rf ipinfo_${VERSION}_linux_amd64.tar.gz
+```
+
+
+
+#### ARG
+
+```dockerfile
+FROM ubuntu:20.04
+ARG VERSION=2.0.1
+RUN apt-get update && \
+    apt-get install -y wget && \
+    wget https://github.com/ipinfo/cli/releases/download/ipinfo-${VERSION}/ipinfo_${VERSION}_linux_amd64.tar.gz && \
+    tar zxf ipinfo_${VERSION}_linux_amd64.tar.gz && \
+    mv ipinfo_${VERSION}_linux_amd64 /usr/bin/ipinfo && \
+    rm -rf ipinfo_${VERSION}_linux_amd64.tar.gz
+```
+
+
+
+`ARG` 和 `ENV` 是经常容易被混淆的两个Dockerfile的语法，都可以用来设置一个“变量”。 但实际上两者有很多的不同。
+
+
+
+#### 区别
+
+![](https://dockertips.readthedocs.io/en/latest/_images/docker_environment_build_args.png)
+
+
+
+ARG 可以在镜像build的时候动态修改value, 通过 `--build-arg`
+
+```sh
+$ docker image build -f ./Dockerfile-arg -t ipinfo-arg-2.0.0 --build-arg VERSION=2.0.0 .   #原版本为2.0.1
+$ docker image ls
+REPOSITORY         TAG       IMAGE ID       CREATED          SIZE
+ipinfo-arg-2.0.0   latest    0d9c964947e2   6 seconds ago    124MB
+$ docker container run -it ipinfo-arg-2.0.0
+root@b64285579756:/#
+root@b64285579756:/# ipinfo version
+2.0.0
+root@b64285579756:/#
+```
+
+ENV 设置的变量可以在Image中保持，并在容器中的环境变量里
+
+
+
+
+
+### 容器启动命令CMD
+
+```CMD```可以用来设置容器启动时默认会执行的命令
+
+- 容器启动时默认执行的命令
+- 如果docker container run启动容器时指定了其它命令，则CMD命令会被忽略
+- 如果定义了多个CMD，只有最后一个会被执行。(Dockerfile文件中)
+
+例如：
+
+```dockerfile
+FROM scratch 
+ADD main /
+CMD ["/main"]
+```
+
+构建镜像:
+
+```sh
+$ docker image build -t iceymoss/hello_go:1.0 .   #构建镜像
+```
+
+创建容器时：
+
+```sh
+$ docker container run iceymoss/hello_go:1.0
+```
+
+docker就会去的镜像shell中执行```/main```
+
+
+
+##### 清除退出的命令
+
+> docker system prune -f
+
+
+
+##### 清除没有使用的镜像
+
+> docker image prune -a
+
+
+
+### 容器启动命令 ENTRYPOINT
+
+NTRYPOINT 也可以设置容器启动时要执行的命令，但是和CMD是有区别的。
+
+- `CMD` 设置的命令，可以在docker container run 时传入其它命令，覆盖掉 `CMD` 的命令，但是 `ENTRYPOINT` 所设置的命令是一定会被执行的。
+- `ENTRYPOINT` 和 `CMD` 可以联合使用，`ENTRYPOINT` 设置执行的命令，CMD传递参数
+
+
+
+实例：
+
+构建三个镜像
+
+Dockerfile-cmd:
+
+```dockerfile
+FROM ubuntu:20.04
+CMD ["echo","hello,docker"]
+```
+
+
+
+Dockerfile-ent:
+
+```dockerfile
+FROM ubuntu:20.04
+CMD ["echo","hello,docker"]
+```
+
+
+
+Dockerfile:
+
+```dockerfile
+FROM ubuntu:20.04
+ENTRYPOINT [ "echo" ]
+CMD []
+```
+
+
+
+将他们分别构建
+
+```sh
+$ docker image build -f ./Dockerfile-cmd -t dome-cmd .
+```
+
+```sh
+$ docker image build -f ./Dockerfile-ent -t dome-ent .
+```
+
+```sh
+$ docker image build -f ./Dockerfile -t dome-both .  
+```
+
+```sh
+$ docker images                                                                                                    
+REPOSITORY   TAG       IMAGE ID       CREATED          SIZE
+dome-cmd     latest    f6dc13ce942a   18 months ago    65.6MB
+dome-ent     latest    f6dc13ce942a   18 months ago    65.6MB
+dome-both    latest    b5cb092c67ea   18 months ago    65.6MB
+```
+
+他们的大小都是一样的
+
+```sh
+$ docker container run dome-cmd echo "hi,iceymoss"                                                              
+hi,iceymoss   #原内容被覆盖了
+$ docker container run demo-ent echo "hi,iceymoss"                                                               
+hello,docker echo hi,iceymoss    #打印原内容，因为容器一定会执行ENTRYPOINT的命令，所以我们运行容器时写入的命令也会被当做参数传入给ENTRYPOINT
+
+$ docker container run dome-both                                                                           
+					#没有输入任何参数，为空
+$ docker container run dome-both "吃了吗?"    
+吃了吗?   
+```
+
+#### Shell格式
+
+```dockerfile
+CMD echo "hello docker"
+```
+
+
+
+```dockerfile
+ENTRYPOINT echo "hello docker"
+```
+
+#### Exec格式
+
+以可执行命令的方式
+
+```dockerfile
+ENTRYPOINT ["echo", "hello docker"]
+```
+
+
+
+```dockerfile
+CMD ["echo", "hello docker"]
+```
+
+
+
+注意shell脚本的问题
+
+```dockerfile
+FROM ubuntu:20.04
+ENV NAME=docker
+CMD echo "hello $NAME"
+```
+
+
+
+假如我们要把上面的CMD改成Exec格式，下面这样改是不行的, 大家可以试试。
+
+```dockerfile
+FROM ubuntu:20.04
+ENV NAME=docker
+CMD ["echo", "hello $NAME"]
+```
+
+
+
+它会打印出 `hello $NAME` , 而不是 `hello docker` ,那么需要怎么写呢？ 我们需要以shell脚本的方式去执行
+
+```dockerfile
+FROM ubuntu:20.04
+ENV NAME=docker
+CMD ["sh", "-c", "echo hello $NAME"]
+```
+
+
+
+#### 构建一个python服务
+
+Python 程序
+
+```python
+from flask import Flask
+
+app = Flask(__name__)
+
+
+@app.route('/')
+def hello_world():
+    return 'Hello, World!'
+```
+
+Dockerfile
+
+```go
+FROM python:3.9.5-slim
+
+COPY app.py /src/app.py
+
+RUN pip install flask
+
+WORKDIR /src
+ENV FLASK_APP=app.py
+
+EXPOSE 5000
+
+CMD ["flask", "run", "-h", "0.0.0.0"]
+```
+
+构建：
+
+```sh
+$ docker image build -t flask-demo .
+```
+
+运行：
+
+```sh
+$ docker run -d -p 5000:5000 flask-demo
+```
+
