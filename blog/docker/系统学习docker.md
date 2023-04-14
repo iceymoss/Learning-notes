@@ -1340,3 +1340,476 @@ $ docker image build -t flask-demo .
 $ docker run -d -p 5000:5000 flask-demo
 ```
 
+
+
+#### 构建一个goweb服务
+
+由于我对go比较熟，所以使用go也来构建一个镜像吧
+
+在此之前你应该需要安装gin框架
+
+```sh
+go get -u github.com/gin-gonic/gin
+```
+
+main.go
+
+```go
+package main
+
+import (
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+)
+
+// handle方法
+func Pong(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"name":   "ice_moss",
+		"age":    18,
+		"school": "家里蹲大学",
+	})
+}
+
+func main() {
+	//初始化一个gin的server对象
+	//Default实例化对象具有日志和返回状态功能
+	r := gin.Default()
+	//注册路由，并编写处理方法
+	r.GET("/ping", Pong)
+	//监听端口：默认端口listen and serve on 0.0.0.0:8080
+	r.Run(":8083")
+}
+```
+
+
+
+然后直接编译成可执行文件(当然我们可以将源码复制到基础镜像中再编译也可以)
+
+```sh
+go build main main.go
+```
+
+然后来编写Dockerfile文件
+
+```dockerfile
+FROM ubuntu:latest
+COPY main /
+EXPOSE 8083
+CMD ["/main"]
+```
+
+然后构建：
+
+```sh
+docker image build -t gin-gemo:1.0 .
+```
+
+最后如将端口映射到宿主机器端口上：8083
+
+```
+docker run -d -p 8083:8083 gin-demo:1.0
+```
+
+直接访问：127.0.0.1:8083
+
+但是这里要注意：我实在Linux服务器演示的，如果您的是M1的mac就会出现CPU架构不兼容问题，你需要找到对应架构的基础镜像。
+
+
+
+### Dockerfile 技巧——合理使用 .dockerignore
+
+Docker是client-server架构，理论上Client和Server可以不在一台机器上。
+
+在构建docker镜像的时候，需要把所需要的文件由CLI（client）发给Server，这些文件实际上就是build context
+
+举例：
+
+```sh
+$ dockerfile-demo more Dockerfile
+FROM python:3.9.5-slim
+
+RUN pip install flask
+
+WORKDIR /src
+ENV FLASK_APP=app.py
+
+COPY app.py /src/app.py
+
+EXPOSE 5000
+
+CMD ["flask", "run", "-h", "0.0.0.0"]
+$ dockerfile-demo more app.py
+from flask import Flask
+
+app = Flask(__name__)
+
+
+@app.route('/')
+def hello_world():
+    return 'Hello, world!'
+```
+
+构建的时候，第一行输出就是发送build context。11.13MB （这里是Linux环境下的log）
+
+```sh
+$ docker image build -t demo .
+Sending build context to Docker daemon  11.13MB
+Step 1/7 : FROM python:3.9.5-slim
+ ---> 609da079b03a
+Step 2/7 : RUN pip install flask
+ ---> Using cache
+ ---> 955ce495635e
+Step 3/7 : WORKDIR /src
+ ---> Using cache
+ ---> 1c2f968e9f9b
+Step 4/7 : ENV FLASK_APP=app.py
+ ---> Using cache
+ ---> dceb15b338cf
+Step 5/7 : COPY app.py /src/app.py
+ ---> Using cache
+ ---> 0d4dfef28b5f
+Step 6/7 : EXPOSE 5000
+ ---> Using cache
+ ---> 203e9865f0d9
+Step 7/7 : CMD ["flask", "run", "-h", "0.0.0.0"]
+ ---> Using cache
+ ---> 35b5efae1293
+Successfully built 35b5efae1293
+Successfully tagged demo:latest
+```
+
+
+
+### .dockerignore 文件
+
+相信使用git的同学都知道，.gitignore 文件， 我们使用他对应的语法，可以指定哪些文件进行上传，哪些文件涉及隐私，不需要生上传等。
+
+目录结构如下：
+
+```sh
+root@VM-0-6-ubuntu:/home/ubuntu/iceymoss/docker_go$ ls
+Dockerfile  go.mod  go.sum  main  main.go
+root@VM-0-6-ubuntu:/home/ubuntu/iceymoss/docker_go$
+```
+
+编写一个.dockerignore文件：
+
+```
+/go.mod
+/go.sum
+/main.go
+```
+
+下面再进行构建：
+
+```sh
+root@VM-0-6-ubuntu:/home/ubuntu/iceymoss/docker_go$ docker image build -t gin-demo:1.1 .
+Sending build context to Docker daemon   10.5MB    #文件大小就变小了，镜像的构建会更快
+Step 1/4 : FROM ubuntu:latest
+ ---> ba6acccedd29
+Step 2/4 : COPY main /
+ ---> Using cache
+ ---> d236d1c477d1
+Step 3/4 : EXPOSE 8083
+ ---> Using cache
+ ---> a1d844c6e4ca
+Step 4/4 : CMD ["/main"]
+ ---> Using cache
+ ---> f002e06a38b9
+Successfully built f002e06a38b9
+Successfully tagged gin-demo:1.1
+root@VM-0-6-ubuntu:/home/ubuntu/iceymoss/docker_go#
+```
+
+
+
+### 多阶段构建
+
+当我们本地没有对应编程语言的开发环境，但是有需要使用运行我们写出来程序，或者是本地CPU架构不一致，我们不能直接在本地直接编译成可执行文件去构建镜像，那么我们可以在基础镜像中去配置对应程序的编译和运行环境然后再将源码在镜像中镜像编译，最后运行容器即可。
+
+例外我现在本地没有go的开发环境，然后我们来构建一个go的web服务的镜像。
+
+main.go
+
+```go
+package main
+
+import (
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+)
+
+// handle方法
+func Pong(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"name":   "ice_moss",
+		"age":    18,
+		"school": "家里蹲大学",
+	})
+}
+
+func main() {
+	//初始化一个gin的server对象
+	//Default实例化对象具有日志和返回状态功能
+	r := gin.Default()
+	//注册路由，并编写处理方法
+	r.GET("/ping", Pong)
+	//监听端口：默认端口listen and serve on 0.0.0.0:8080
+	r.Run(":8083")
+}
+```
+
+Dockerfile:
+
+```dockerfile
+FROM golang:alpine3.17
+COPY main.go /src/
+COPY go.mod /src/
+COPY go.sum /src/
+
+ENV GO111MODULE=on
+
+WORKDIR /src
+RUN go mod download && \
+    go build main.go
+
+EXPOSE 8083
+CMD ["/src/main"]
+```
+
+然后构建：
+
+```sh
+docker image build -t gin-demo:1.0 .
+```
+
+构建成功后：
+
+```sh
+[web] docker images                                                                                           
+REPOSITORY        TAG       IMAGE ID       CREATED          SIZE
+gin-demo          1.0       0addd4b55b80   4 minutes ago    519MB    #一个简单的web应用居然这么大！我不能接受
+alpine/git        latest    9793ee61fc75   4 months ago     43.4MB
+nginx             latest    eeb9db34b331   15 months ago    134MB
+ubuntu            latest    d5ca7a445605   18 months ago    65.6MB
+```
+
+原因是基础镜像golang:alpine3.17太大了
+
+我们可以创建容器：
+
+```sh
+docker container run -d -p 8083:8083 gin-demo:1.0
+```
+
+
+
+#### 多阶段构建
+
+我们可以先将man.go在golang:alpine3.17编译成可执行文件，然后再将可执行文件放入ubuntu:latest镜像中
+
+```dockerfile
+FROM golang:alpine3.17 AS builder
+COPY main.go /src/
+COPY go.mod /src/
+COPY go.sum /src/   
+ 
+ENV GO111MODULE=on
+
+WORKDIR /src
+RUN go mod download && \
+    go build main.go
+
+FROM ubuntu:20.04
+COPY --from=builder /src/main /src/main
+
+EXPOSE 8083
+CMD ["/src/main"]
+```
+
+然后构建：
+
+```
+docker image build -t gin-demo:2.0 .
+```
+
+可以看到：
+
+```sh
+[web] docker images                                                                                                                                                                                                                 21:42:53
+REPOSITORY        TAG       IMAGE ID       CREATED          SIZE
+gin-demo          2.0       c49a0acbcf4c   2 minutes ago    75.7MB  #可以看到2.0变得很小了
+gin-demo          1.0       0addd4b55b80   19 minutes ago   519MB
+ubuntu            latest    d5ca7a445605   18 months ago    65.6MB
+```
+
+这样我的的web应用就得到了瘦身，总体上效果还可以的，这就是多阶段构建。
+
+
+
+### 尽量使用非root用户
+
+> 这里在操作需要在Linux系统下
+
+#### Root的危险性
+
+docker的root权限一直是其遭受诟病的地方，docker的root权限有那么危险么？我们举个例子。
+
+假如我们有一个用户，叫demo，它本身不具有sudo的权限，所以就有很多文件无法进行读写操作，比如/root目录它是无法查看的。
+
+```sh
+[demo@docker-host ~]$ sudo ls /root
+[sudo] password for demo:
+demo is not in the sudoers file.  This incident will be reported.
+[demo@docker-host ~]$
+```
+
+
+
+但是这个用户有执行docker的权限，也就是它在docker这个group里。
+
+```sh
+[demo@docker-host ~]$ groups
+demo docker
+[demo@docker-host ~]$ docker image ls
+REPOSITORY   TAG       IMAGE ID       CREATED      SIZE
+busybox      latest    a9d583973f65   2 days ago   1.23MB
+[demo@docker-host ~]$
+```
+
+
+
+这时，我们就可以通过Docker做很多越权的事情了，比如，我们可以把这个无法查看的/root目录映射到docker container里，你就可以自由进行查看了。
+
+```sh
+[demo@docker-host vagrant]$ docker run -it -v /root/:/root/tmp busybox sh
+/ # cd /root/tmp
+~/tmp # ls
+anaconda-ks.cfg  original-ks.cfg
+~/tmp # ls -l
+total 16
+-rw-------    1 root     root          5570 Apr 30  2020 anaconda-ks.cfg
+-rw-------    1 root     root          5300 Apr 30  2020 original-ks.cfg
+~/tmp #
+```
+
+
+
+更甚至我们可以给我们自己加sudo权限。我们现在没有sudo权限
+
+```sh
+[demo@docker-host ~]$ sudo vim /etc/sudoers
+[sudo] password for demo:
+demo is not in the sudoers file.  This incident will be reported.
+[demo@docker-host ~]$
+```
+
+
+
+但是我可以给自己添加。
+
+```sh
+[demo@docker-host ~]$ docker run -it -v /etc/sudoers:/root/sudoers busybox sh
+/ # echo "demo    ALL=(ALL)       ALL" >> /root/sudoers
+/ # more /root/sudoers | grep demo
+demo    ALL=(ALL)       ALL
+```
+
+
+
+然后退出container，bingo，我们有sudo权限了。
+
+```sh
+[demo@docker-host ~]$ sudo more /etc/sudoers | grep demo
+demo    ALL=(ALL)       ALL
+[demo@docker-host ~]$
+```
+
+#### 如何使用非root用户
+
+我们准备两个Dockerfile，第一个Dockerfile如下，其中app.py文件源码请参考 [一起构建一个 Python Flask 镜像](https://dockertips.readthedocs.io/en/latest/dockerfile-guide/python-flask.html#python-flask) ：
+
+```dockerfile
+FROM python:3.9.5-slim
+
+RUN pip install flask
+
+COPY app.py /src/app.py
+
+WORKDIR /src
+ENV FLASK_APP=app.py
+
+EXPOSE 5000
+
+CMD ["flask", "run", "-h", "0.0.0.0"]
+```
+
+
+
+假设构建的镜像名字为 `flask-demo`
+
+第二个Dockerfile，使用非root用户来构建这个镜像，名字叫 `flask-no-root` Dockerfile如下：
+
+- 通过groupadd和useradd创建一个flask的组和用户
+- 通过USER指定后面的命令要以flask这个用户的身份运行
+
+```dockerfile
+FROM python:3.9.5-slim
+
+RUN pip install flask && \
+    groupadd -r flask && useradd -r -g flask flask && \
+    mkdir /src && \
+    chown -R flask:flask /src
+
+USER flask
+
+COPY app.py /src/app.py
+
+WORKDIR /src
+ENV FLASK_APP=app.py
+
+EXPOSE 5000
+
+CMD ["flask", "run", "-h", "0.0.0.0"]
+```
+
+
+
+```sh
+$ docker image ls
+REPOSITORY      TAG          IMAGE ID       CREATED          SIZE
+flask-no-root   latest       80996843356e   41 minutes ago   126MB
+flask-demo      latest       2696c68b51ce   49 minutes ago   125MB
+python          3.9.5-slim   609da079b03a   2 weeks ago      115MB
+```
+
+
+
+分别使用这两个镜像创建两个容器
+
+```sh
+$ docker run -d --name flask-root flask-demo
+b31588bae216951e7981ce14290d74d377eef477f71e1506b17ee505d7994774
+$ docker run -d --name flask-no-root flask-no-root
+83aaa4a116608ec98afff2a142392119b7efe53617db213e8c7276ab0ae0aaa0
+$ docker container ps
+CONTAINER ID   IMAGE           COMMAND                  CREATED          STATUS          PORTS      NAMES
+83aaa4a11660   flask-no-root   "flask run -h 0.0.0.0"   4 seconds ago    Up 3 seconds    5000/tcp   flask-no-root
+b31588bae216   flask-demo      "flask run -h 0.0.0.0"   16 seconds ago   Up 15 seconds   5000/tcp   flask-root
+```
+
+
+
+### 导航
+
+[Dockerfile](https://docs.docker.com/reference/)
+
+[github/docker](https://github.com/docker-library/official-images)
+
+
+
+## docker的存储
+
