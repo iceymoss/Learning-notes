@@ -413,7 +413,7 @@ attached模式就是指将容器在前台运行，窗口不能退出，假如我
 2023/04/10 08:16:46 [error] 32#32: *1 open() "/usr/share/nginx/html/favicon.ico" failed (2: No such file or directory), client: 172.17.0.1, server: localhost, request: "GET /favicon.ico HTTP/1.1", host: "127.0.0.1", referrer: "http://127.0.0.1/"
 ```
 
-#### detached模式
+#### detached
 
 就是让容器在后台运行，不会占用终端，不会输出日志，当终端退出后，容器依然会运行
 
@@ -1812,4 +1812,493 @@ b31588bae216   flask-demo      "flask run -h 0.0.0.0"   16 seconds ago   Up 15 s
 
 
 ## docker的存储
+
+我们知道运行的容器时，是在image加上一层```read-write```层，我们所需要的数据也会存储在该层里面，但是这些数据随着容器的删除而删除了，例如数据库容器等，这些数据一定不能随着容器的删除而删除，这是非常危险的，所以必须要对docker容器数据进行持久化。
+
+默认情况下，在运行中的容器里创建的文件，被保存在一个可写的容器层：
+
+- 如果容器被删除了，则数据也没有了
+- 这个可写的容器层是和特定的容器绑定的，也就是这些数据无法方便的和其它容器共享
+
+Docker主要提供了两种方式做数据的持久化
+
+- Data Volume, 由Docker管理，(/var/lib/docker/volumes/ Linux), 持久化数据的最好方式
+- Bind Mount，由用户指定存储的数据具体mount在系统什么位置
+
+![](https://dockertips.readthedocs.io/en/latest/_images/types-of-mounts.png)
+
+### 持久化之data-volume
+
+#### VOLUME的使用
+
+Dockerfile：构建一个计划任务的镜像，定时向容器中```/app/my-cron```写入时间数据
+
+```dockerfile
+FROM alpine:latest
+RUN apk update
+RUN apk --no-cache add curl
+ENV SUPERCRONIC_URL=https://github.com/aptible/supercronic/releases/download/v0.1.12/supercronic-linux-amd64 \
+    SUPERCRONIC=supercronic-linux-amd64 \
+    SUPERCRONIC_SHA1SUM=048b95b48b708983effb2e5c935a1ef8483d9e3e
+RUN curl -fsSLO "$SUPERCRONIC_URL" \
+    && echo "${SUPERCRONIC_SHA1SUM}  ${SUPERCRONIC}" | sha1sum -c - \
+    && chmod +x "$SUPERCRONIC" \
+    && mv "$SUPERCRONIC" "/usr/local/bin/${SUPERCRONIC}" \
+    && ln -s "/usr/local/bin/${SUPERCRONIC}" /usr/local/bin/supercronic
+COPY my-cron /app/my-cron
+WORKDIR /app
+
+VOLUME ["/app"]
+
+# RUN cron job
+CMD ["/usr/local/bin/supercronic", "/app/my-cron"]
+```
+
+**注意：```VOLUME ["/app"]```他会将容器里面的```/app```目录的所有内容持久化到宿主机磁盘**
+
+
+
+#### 构建镜像
+
+```
+root@VM-0-6-ubuntu:/home/ubuntu/iceymoss/docker-demo/ch01# ls
+Dockerfile  my-cron
+root@VM-0-6-ubuntu:/home/ubuntu/iceymoss/docker-demo/ch01# docker image build -t my-cron .
+```
+
+
+
+#### 创建容器-不指定参数v
+
+这里我们要了解两个命令：
+
+> docker volume ls    #展示docker本地持久化文件
+
+
+
+> docker volume inspect filename  #获取对应docker本地文件相关信息
+
+
+
+此时Docker会自动创建一个随机名字的volume，去存储我们在Dockerfile定义的volume `VOLUME["/app"]`
+
+```sh
+$ docker run -d my-cron   #运行容器
+9a8fa93f03c42427a498b21ac520660752122e20bcdbf939661646f71d277f8f
+$ docker volume ls    #获取持久化的本地文件
+DRIVER    VOLUME NAME
+local     4ffa38075aa01b717256f53275ed5a2860e4c4f8df61e0a312628e59b8a90ed3
+$ docker inspect 4ffa38075aa01b717256f53275ed5a2860e4c4f8df61e0a312628e59b8a90ed3   #获取持久化信息
+[
+    {
+        "CreatedAt": "2023-04-15T16:30:38+08:00",
+        "Driver": "local",
+        "Labels": null,
+        "Mountpoint": "/var/lib/docker/volumes/4ffa38075aa01b717256f53275ed5a2860e4c4f8df61e0a312628e59b8a90ed3/_data",
+        "Name": "4ffa38075aa01b717256f53275ed5a2860e4c4f8df61e0a312628e59b8a90ed3",
+        "Options": null,
+        "Scope": "local"
+    }
+]
+```
+
+输出的这个Volume的mountpoint可以发现容器创建的文件
+
+
+
+#### 创建容器-指定参数v
+
+在创建容器的时候通过 `-v` 参数我们可以手动的指定需要创建Volume的名字，以及对应于容器内的路径，这个路径是可以任意的，不必需要在Dockerfile里通过VOLUME定义
+
+比如我们把上面的Dockerfile里的VOLUME删除
+
+```dockerfile
+FROM alpine:latest
+RUN apk update
+RUN apk --no-cache add curl
+ENV SUPERCRONIC_URL=https://github.com/aptible/supercronic/releases/download/v0.1.12/supercronic-linux-amd64 \
+    SUPERCRONIC=supercronic-linux-amd64 \
+    SUPERCRONIC_SHA1SUM=048b95b48b708983effb2e5c935a1ef8483d9e3e
+RUN curl -fsSLO "$SUPERCRONIC_URL" \
+    && echo "${SUPERCRONIC_SHA1SUM}  ${SUPERCRONIC}" | sha1sum -c - \
+    && chmod +x "$SUPERCRONIC" \
+    && mv "$SUPERCRONIC" "/usr/local/bin/${SUPERCRONIC}" \
+    && ln -s "/usr/local/bin/${SUPERCRONIC}" /usr/local/bin/supercronic
+COPY my-cron /app/my-cron
+WORKDIR /app
+
+# RUN cron job
+CMD ["/usr/local/bin/supercronic", "/app/my-cron"]
+```
+
+然后从新构建容器：
+
+```
+root@VM-0-6-ubuntu:/home/ubuntu/iceymoss/docker-demo/ch01# docker image build -t my-cron .
+```
+
+重新build镜像，然后创建容器，加-v参数
+
+> docker container run -d -v 持久化到本地文件名称:需要进行持久化的命令或者文件
+
+例如：
+
+> docker container run -d -v cron-data:/app my-cron
+
+如果我们的容器不小心被删除了，我们之前的持久化文件还在，我们新建容器只需要使用该命令，指定相同文件或者目录即可。
+
+```sh
+$ docker container run -d -v cron-data:/app my-cron
+43c6d0357b0893861092a752c61ab01bdfa62ea766d01d2fcb8b3ecb6c88b3de
+$ docker volume ls
+DRIVER    VOLUME NAME
+local     cron-data
+$ docker volume inspect cron-data
+[
+    {
+        "CreatedAt": "2023-04-15T16:30:38+08:00",
+        "Driver": "local",
+        "Labels": null,
+        "Mountpoint": "/var/lib/docker/volumes/cron-data/_data",
+        "Name": "cron-data",
+        "Options": null,
+        "Scope": "local"
+    }
+]
+$ ls /var/lib/docker/volumes/cron-data/_data
+my-cron
+$ ls /var/lib/docker/volumes/cron-data/_data
+my-cron  test.txt
+```
+
+Volume也创建了。
+
+
+
+#### 数据清理
+
+强制删除所有容器，系统清理和volume清理
+
+```sh
+$ docker rm -f $(docker container ps -aq)
+$ docker system prune -f
+$ docker volume prune -f  
+```
+
+
+
+### mysql数据持久化实践
+
+现在我们来实践使用volume对MySQL数据库容器的数据做持久化
+
+#### 拉取mysq
+
+```sh
+docker pull mysql:latest
+```
+
+
+
+#### 运行mysql容器
+
+```sh
+[~] docker container run --name demo-mysql -e MYSQL_ROOT_PASSWORD=123456 -d -p 3307:3306 -v mysql-data:/var/lib/mysql mysql:latest
+```
+
+#### 说明
+
+* ```--name```：运行的容器名称
+
+* ```-e MYSQL_ROOT_PASSWORD```：表示当前MySQL容器的密码
+* ```-p 3307:3306```：有容器端口3306映射到宿主机端口
+* ```-v mysql-data:/var/lib/mysql```：将容器中的```/var/lib/mysql```持久化到宿主机```mysql-data```中
+
+这里由于我们本地mysql占用3306，所以我开3307
+
+
+
+然后我们之间连接MySQL服务(或者直接进入MySQL容器中)，写入如下内容：建立一个user数据库，新建一个user_info表
+
+```sql
+CREATE DATABASE user
+    DEFAULT CHARACTER SET = 'utf8mb4';
+
+CREATE TABLE user_info(
+    id int COMMENT '用户id',
+    name VARCHAR(30) COMMENT '姓名',
+    age INT COMMENT '年龄',
+    gender VARCHAR(10) COMMENT '性别'
+)COMMENT '用户基本信息表';
+```
+
+
+
+然后我们来查看运行持久化文件
+
+```sh
+[~] docker volume ls                                                                                                                                                                              
+DRIVER    VOLUME NAME
+local     mysql-data
+[~] docker inspect mysql-data                                                                                                                                                                     
+[
+    {
+        "CreatedAt": "2023-04-15T09:17:49Z",
+        "Driver": "local",
+        "Labels": null,
+        "Mountpoint": "/var/lib/docker/volumes/mysql-data/_data",
+        "Name": "mysql-data",
+        "Options": null,
+        "Scope": "local"
+    }
+]
+```
+
+可以查看：```/var/lib/docker/volumes/mysql-data/_data```
+
+```sh
+$ /var/lib/docker/volumes/mysql-data/_data
+auto.cnf    client-cert.pem  ib_buffer_pool  ibdata1  performance_schema  server-cert.pem
+ca-key.pem  client-key.pem   ib_logfile0     ibtmp1   private_key.pem     server-key.pem
+ca.pem      user             ib_logfile1     mysql    public_key.pem      sys
+```
+
+**注意：如果是mac和win系统是直接查看不了```/var/lib/docker/volumes/mysql-data/_data```，原因是docker运行在Linux虚拟机中**
+
+**当我们把MySQL这个容器删除后，然后重新运行一个MySQL容器，持久化的数据会被导入新的容器中**
+
+
+
+
+
+### 持久化之Bind Mount
+
+前面说过：如果是mac和win系统是直接查看不了```/var/lib/docker/volumes/mysql-data/_data```；现在可以直接使用BindMount将容器中的内容映射到宿主机上的指定目录之下。
+
+依然使用MySQL容器作为例子：
+
+当前目录下什么都没有：
+
+```sh
+[mysql-data] ls
+[mysql-data] 
+[mysql-data] pwd                                                                                             
+/Users/iceymoss/iceymoss/dockerlearn/mysql-data
+```
+
+然后运行：
+
+```sh
+[mysql-data] docker container run --name demo-mysql -e MYSQL_ROOT_PASSWORD=123456 -d -p 3307:3306 -v $(pwd):/var/lib/mysql mysql:latest
+```
+
+说明：
+
+* ```-v $(pwd):/var/lib/mysql```：表示将宿主机当前目录下进行持久化映射到mysql容器中的```/var/lib/mysql```
+
+
+
+只需要这样我们就完成了容器数据持久化到宿主机的指定目录下。
+
+进入容器shell或者mysql连接工具，创建两个数据库：
+
+```mysql
+CREATE DATABASE good
+    DEFAULT CHARACTER SET = 'utf8mb4';
+
+CREATE DATABASE user
+    DEFAULT CHARACTER SET = 'utf8mb4';
+```
+
+启动容器后可以查看当前目录的情况：
+
+```
+[mysql-data] ls                                                                                                 
+#ib_16384_0.dblwr  #innodb_temp       binlog.000002      ca.pem             good               ibtmp1             mysql.sock         public_key.pem     sys                user
+#ib_16384_1.dblwr  auto.cnf           binlog.index       client-cert.pem    ib_buffer_pool     mysql              performance_schema server-cert.pem    undo_001
+#innodb_redo       binlog.000001      ca-key.pem         client-key.pem     ibdata1            mysql.ibd          private_key.pem    server-key.pem     undo_002
+
+```
+
+可以看到我们创建的数据库。
+
+和volume一样，如果将当前MySQL的容器删除，然后重新创建一个MySQL容器，只需要将宿主机```/Users/iceymoss/iceymoss/dockerlearn/mysql-data```重新映射到容器中```/var/lib/mysql```就可以持久化数据重新加载到容器中。
+
+
+
+### 基于docker搭建开发环境
+
+假如我们在本地没有安装对应编程语言的开发环境，这里以golang例，我们可以将编写好的golang程序使用BindMout上传至有golang开发环境的基础镜像中去，然后进行编译运行。
+
+举个例子：
+
+main.go
+
+```go
+package "main"
+import "fmt"
+
+func main(){
+	fmt.Println("hello,docker")
+}
+```
+
+然后使用命令：
+
+```sh
+[ch01] docker container run -it -v $(pwd):/root golang:alpine3.17
+```
+
+进入容器：
+
+```
+~ # cd /root
+~ # ls
+main.go
+~ # go run main.go
+hello,docker
+~ # go build main.go
+~ # ls
+main     main.go
+~ # ./main
+hello,docker
+```
+
+这样我们的程序就运行和编译了。
+
+
+
+### 多个机器之间的容器共享数据
+
+![multi-host-volume](https://dockertips.readthedocs.io/en/latest/_images/volumes-shared-storage.png)
+
+官方参考链接 https://docs.docker.com/storage/volumes/#share-data-among-machines
+
+Docker的volume支持多种driver。默认创建的volume driver都是local
+
+```sh
+$ docker volume inspect vscode
+[
+    {
+        "CreatedAt": "2021-06-23T21:33:57Z",
+        "Driver": "local",
+        "Labels": null,
+        "Mountpoint": "/var/lib/docker/volumes/vscode/_data",
+        "Name": "vscode",
+        "Options": null,
+        "Scope": "local"
+    }
+]
+```
+
+
+
+这一节我们看看一个叫sshfs的driver，如何让docker使用不在同一台机器上的文件系统做volume
+
+#### 环境准备
+
+准备三台Linux机器，之间可以通过SSH相互通信。
+
+| hostname     | ip             | ssh username | ssh password |
+| ------------ | -------------- | ------------ | ------------ |
+| docker-host1 | 192.168.200.10 | vagrant      | vagrant      |
+| docker-host2 | 192.168.200.11 | vagrant      | vagrant      |
+| docker-host3 | 192.168.200.12 | vagrant      | vagrant      |
+
+#### 安装plugin
+
+在其中两台机器上安装一个plugin `vieux/sshfs`
+
+```sh
+[vagrant@docker-host1 ~]$ docker plugin install --grant-all-permissions vieux/sshfs
+latest: Pulling from vieux/sshfs
+Digest: sha256:1d3c3e42c12138da5ef7873b97f7f32cf99fb6edde75fa4f0bcf9ed277855811
+52d435ada6a4: Complete
+Installed plugin vieux/sshfs
+```
+
+
+
+```sh
+[vagrant@docker-host2 ~]$ docker plugin install --grant-all-permissions vieux/sshfs
+latest: Pulling from vieux/sshfs
+Digest: sha256:1d3c3e42c12138da5ef7873b97f7f32cf99fb6edde75fa4f0bcf9ed277855811
+52d435ada6a4: Complete
+Installed plugin vieux/sshfs
+```
+
+
+
+#### 创建volume
+
+```sh
+[vagrant@docker-host1 ~]$ docker volume create --driver vieux/sshfs \
+                          -o sshcmd=vagrant@192.168.200.12:/home/vagrant \
+                          -o password=vagrant \
+                          sshvolume
+```
+
+
+
+查看
+
+```sh
+[vagrant@docker-host1 ~]$ docker volume ls
+DRIVER               VOLUME NAME
+vieux/sshfs:latest   sshvolume
+[vagrant@docker-host1 ~]$ docker volume inspect sshvolume
+[
+    {
+        "CreatedAt": "0001-01-01T00:00:00Z",
+        "Driver": "vieux/sshfs:latest",
+        "Labels": {},
+        "Mountpoint": "/mnt/volumes/f59e848643f73d73a21b881486d55b33",
+        "Name": "sshvolume",
+        "Options": {
+            "password": "vagrant",
+            "sshcmd": "vagrant@192.168.200.12:/home/vagrant"
+        },
+        "Scope": "local"
+    }
+]
+```
+
+#### 创建容器挂载Volume
+
+创建容器，挂载sshvolume到/app目录，然后进入容器的shell，在/app目录创建一个test.txt文件
+
+```sh
+[vagrant@docker-host1 ~]$ docker run -it -v sshvolume:/app busybox sh
+Unable to find image 'busybox:latest' locally
+latest: Pulling from library/busybox
+b71f96345d44: Pull complete
+Digest: sha256:930490f97e5b921535c153e0e7110d251134cc4b72bbb8133c6a5065cc68580d
+Status: Downloaded newer image for busybox:latest
+/ #
+/ # ls
+app   bin   dev   etc   home  proc  root  sys   tmp   usr   var
+/ # cd /app
+/app # ls
+/app # echo "this is ssh volume"> test.txt
+/app # ls
+test.txt
+/app # more test.txt
+this is ssh volume
+/app #
+/app #
+```
+
+
+
+这个文件我们可以在docker-host3上看到
+
+```sh
+[vagrant@docker-host3 ~]$ pwd
+/home/vagrant
+[vagrant@docker-host3 ~]$ ls
+test.txt
+[vagrant@docker-host3 ~]$ more test.txt
+this is ssh volume
+```
+
+
 
