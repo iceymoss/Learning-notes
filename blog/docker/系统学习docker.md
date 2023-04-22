@@ -2302,3 +2302,508 @@ this is ssh volume
 
 
 
+## docker网络
+
+### 介绍
+
+docker网络主要有：
+
+* Brigde
+* Host
+*  null
+
+```sh
+$ docker network ls
+NETWORK ID     NAME      DRIVER    SCOPE
+b8ca79f73455   bridge    bridge    local
+d90ff26166e3   host      host      local
+82d6ae2e173d   none      null      local
+```
+
+在docker网络中，我们需要回答五个问题
+
+* 容器为什么能获取ip地址。
+* 为什么宿主机可以ping通容器ip。
+
+* 为什么docker容器之可以ping通网络。
+* 为什么容器可以ping通外网地址。
+* 容器端口转发是怎么回事。
+
+
+
+### Brigde网络
+
+docker默认的网络是使用一个doekr0作为网络转发，类似于路由器。其通讯类型是：**bridge** 。
+
+
+
+<img src="https://dockertips.readthedocs.io/en/latest/_images/two-container-network.png" style="zoom:50%;" />
+
+
+
+上图是我们的一台宿主机和运行的两个容器的网络拓扑图，下面我们准备运行的容器：
+
+```sh
+$ docker ps
+CONTAINER ID   IMAGE          COMMAND                  CREATED        STATUS        PORTS                               NAMES
+033243ce3801   mysql:latest   "docker-entrypoint.s…"   24 hours ago   Up 24 hours   33060/tcp, 0.0.0.0:3307->3306/tcp   server-mysql
+a51d40b5eeea   mongo:latest   "docker-entrypoint.s…"   25 hours ago   Up 25 hours   0.0.0.0:27017->27017/tcp            keen_bouman
+0910b6c23f19   redis:latest   "docker-entrypoint.s…"   25 hours ago   Up 25 hours   0.0.0.0:6379->6379/tcp              keen_burnell
+```
+
+然后我们使用命令查看网络：
+
+```sh
+$ docker network ls
+NETWORK ID     NAME      DRIVER    SCOPE
+b8ca79f73455   bridge    bridge    local
+d90ff26166e3   host      host      local
+82d6ae2e173d   none      null      local
+```
+
+使用命令：
+
+```sh
+$ docker network inspect b8ca79f73455
+[
+    {
+        "Name": "bridge",
+        "Id": "b8ca79f73455660003be1225a30a08e58d7575d9a0064b575e876b0294b22545",
+        "Created": "2023-04-21T06:37:17.281109791Z",
+        "Scope": "local",
+        "Driver": "bridge",
+        "EnableIPv6": false,
+        "IPAM": {
+            "Driver": "default",
+            "Options": null,
+            "Config": [
+                {
+                    "Subnet": "172.17.0.0/16",
+                    "Gateway": "172.17.0.1"
+                }
+            ]
+        },
+        "Internal": false,
+        "Attachable": false,
+        "Ingress": false,
+        "ConfigFrom": {
+            "Network": ""
+        },
+        "ConfigOnly": false,
+        "Containers": {
+            "033243ce380110beef00dbc5f61dde95560b9f1633d3bfad70e4da0d4ccfaf42": {
+                "Name": "server-mysql",
+                "EndpointID": "f6561639185394753fafd19e44253640b51e80285d172b397504c86d440ea98e",
+                "MacAddress": "02:42:ac:11:00:04",
+                "IPv4Address": "172.17.0.4/16",
+                "IPv6Address": ""
+            },
+            "0910b6c23f19f7c557fe925a1e9ed60912c62cb10e53fd9aad75e7efd1e195a6": {
+                "Name": "keen_burnell",
+                "EndpointID": "a9db648c673688f09206d06d5eb6f865aff95efbbb65583e6ab539dc14097571",
+                "MacAddress": "02:42:ac:11:00:02",
+                "IPv4Address": "172.17.0.2/16",
+                "IPv6Address": ""
+            },
+            "a51d40b5eeeaa2c917284d0380dcf0a1e4ae2f6d4f674c2c27fb7bbdc7546614": {
+                "Name": "keen_bouman",
+                "EndpointID": "0b455515d4e5e73b597bb9e038a278b3a1cd4af9a23e125ce3cacecec374d063",
+                "MacAddress": "02:42:ac:11:00:03",
+                "IPv4Address": "172.17.0.3/16",
+                "IPv6Address": ""
+            }
+        },
+        "Options": {
+            "com.docker.network.bridge.default_bridge": "true",
+            "com.docker.network.bridge.enable_icc": "true",
+            "com.docker.network.bridge.enable_ip_masquerade": "true",
+            "com.docker.network.bridge.host_binding_ipv4": "0.0.0.0",
+            "com.docker.network.bridge.name": "docker0",
+            "com.docker.network.driver.mtu": "1500"
+        },
+        "Labels": {}
+    }
+]
+```
+
+由上面返回结果：
+
+```sh
+"IPAM": {
+            "Driver": "default",
+            "Options": null,
+            "Config": [
+                {
+                    "Subnet": "172.17.0.0/16",
+                    "Gateway": "172.17.0.1"
+                }
+            ]
+        },
+```
+
+我们看到docker0的ip和网关，**连接在docker0上的容器ip统一在172.17.0.0/16网段下**，这看上去类似于家庭中的网络结构，运行的容器就像是连接在家庭路由器的每一台设备。
+
+同样我们可以看到，三个容器都连接在docker0上：
+
+```sh
+ "Containers": {
+            "033243ce380110beef00dbc5f61dde95560b9f1633d3bfad70e4da0d4ccfaf42": {
+                "Name": "server-mysql",
+                "EndpointID": "f6561639185394753fafd19e44253640b51e80285d172b397504c86d440ea98e",
+                "MacAddress": "02:42:ac:11:00:04",
+                "IPv4Address": "172.17.0.4/16",
+                "IPv6Address": ""
+            },
+            "0910b6c23f19f7c557fe925a1e9ed60912c62cb10e53fd9aad75e7efd1e195a6": {
+                "Name": "keen_burnell",
+                "EndpointID": "a9db648c673688f09206d06d5eb6f865aff95efbbb65583e6ab539dc14097571",
+                "MacAddress": "02:42:ac:11:00:02",
+                "IPv4Address": "172.17.0.2/16",
+                "IPv6Address": ""
+            },
+            "a51d40b5eeeaa2c917284d0380dcf0a1e4ae2f6d4f674c2c27fb7bbdc7546614": {
+                "Name": "keen_bouman",
+                "EndpointID": "0b455515d4e5e73b597bb9e038a278b3a1cd4af9a23e125ce3cacecec374d063",
+                "MacAddress": "02:42:ac:11:00:03",
+                "IPv4Address": "172.17.0.3/16",
+                "IPv6Address": ""
+            }
+        },
+```
+
+
+
+#### 容器为什么能获取ip地址
+
+docker默认的网络是使用一个doekr0作为网络转发，类似于路由器。其通讯类型是：**bridge** 。
+
+Brigde网络类型，为每一个容器分配了一个局域网ip，容器之间可以通讯。
+
+#### 为什么宿主机可以ping通容器ip
+
+<img src="https://dockertips.readthedocs.io/en/latest/_images/two-container-network.png" style="zoom:50%;" />
+
+我们看到docker0这个bridge连接到了我们的宿主机网络，就像是docker链接了一个通往外网的路由一样，就类似于家庭路由器连接到了网络运营商本地的路由器。
+
+
+
+#### 为什么docker容器之可以ping通网络
+
+这个问题其实很好解释了，容器之间都连接了docker0，相当于两个容器在一个局域网内，肯定是可以连通网络的
+
+
+
+#### 为什么容器可以ping通外网地址
+
+当我们进入某一个容器内，例如直接ping```www.baidu.com```这也是能ping通的，这又是为什么呢？直接举个例子你就明白了。
+
+在此之前，你需要明白NAT，也是会网络层的地址转换协议
+
+例：
+
+```sh
+CONTAINER ID   IMAGE     COMMAND                  CREATED          STATUS          PORTS     NAMES
+4f3303c84e53   busybox   "/bin/sh -c 'while t…"   49 minutes ago   Up 49 minutes             box2
+03494b034694   busybox   "/bin/sh -c 'while t…"   49 minutes ago   Up 49 minutes             box1
+```
+
+box1的ip:```172.17.0.3```， box4的ip:```172.17.0.3```
+
+docker0的IP：```172.17.0.1```， 宿主机IP：```192.168.10.4```
+
+本地路由器ip公网ip:```1.14.120.10```
+
+
+
+当我们在容器box1中ping：```www.baidu.com```， 在百度的服务器看来其实是路由器ip:```1.14.120.10```进行的，在外网是无法感知到内网的
+
+其过程是：box1的ip:```172.17.0.3```将数据报发送给docker0IP：```172.17.0.1```然后，docker0查看数据报目的地址然后将自己的ip写入数据报的源地址，然后转发给宿主机，然后宿主机将自己的ip填入数据报中的源地址，最后发给路由器ip公网ip:```1.14.120.10```路由器将自己的ip写入数据报中的源地址，最后发给```www.baidu.com```对应的服务器。
+
+**发数据：172.17.0.3 --> 172.17.0.1 -->  192.168.10.4 -->  1.14.120.10 -->``` www.baidu.com```**
+
+**返回数据：``` www.baidu.com``` -->  1.14.120.10 --> 192.168.10.4  --> 172.17.0.1  --> 172.17.0.3**
+
+
+
+#### 容器端口转发是怎么回事
+
+比如我现在有一个web服务器NGINX容器，他运行的NGINX容器的80端口上，现在我们从其他设备怎么进行访问到这个80端口？
+
+##### 端口映射
+
+我们来开这条命令：
+
+```sh
+$ docker run -d -p 8080:80 nginx:latest
+```
+
+```-p 8080:80```:表示将宿主机上的8080端口映射到容器nginx的80端口，当有请求进来时，请求会先到我们的host:8080端口，然后通过端口转发将宿主机上的8080的请求转发到容器NGINX的80端口上。我们在外网直接对宿主机ip:8080端口就可以请求到NGINXweb服务器。
+
+下面的容器都做了端口转发
+
+```sh
+$ docker run -d -p 8080:80 nginx:latest
+d9f0c712b30919c8854a7e9f06e5d86772a7dca96badbf62f4bc98093b7550c2
+
+# iceymoss @ iceymossdeMacBook-Pro in ~ [16:01:35]
+$ docker ps
+CONTAINER ID   IMAGE          COMMAND                  CREATED         STATUS         PORTS                               NAMES
+d9f0c712b309   nginx:latest   "/docker-entrypoint.…"   4 seconds ago   Up 3 seconds   0.0.0.0:8080->80/tcp                competent_buck
+033243ce3801   mysql:latest   "docker-entrypoint.s…"   25 hours ago    Up 25 hours    33060/tcp, 0.0.0.0:3307->3306/tcp   server-mysql
+a51d40b5eeea   mongo:latest   "docker-entrypoint.s…"   25 hours ago    Up 25 hours    0.0.0.0:27017->27017/tcp            keen_bouman
+0910b6c23f19   redis:latest   "docker-entrypoint.s…"   25 hours ago    Up 25 hours    0.0.0.0:6379->6379/tcp              keen_burnell
+```
+
+##### Dockerfile
+
+我们来看一下一个goweb服务的Dockerfile
+
+```dockerfile
+FROM golang:alpine3.17
+COPY main.go /src/
+COPY go.mod /src/
+COPY go.sum /src/
+
+ENV GO111MODULE=on
+
+WORKDIR /src
+RUN go mod download && \
+    go build main.go
+
+EXPOSE 8083
+CMD ["/src/main"]
+```
+
+仔细看```EXPOSE 8083```表示容器对外暴露的端口，他默认是TCP协议端口，如果我们需要使用UDP协议就需要:
+
+```dockerfile
+EXPOSE 8083/udp
+```
+
+如果我们不编写这一行，当我们在运行这个容器时只需要：
+
+```sh
+docker container run -d -p 8083:8083 gin-demo:1.0
+```
+
+他依然能正常对外暴露我们指定的端口，这里的```EXPOSE 8083```更多的是提示使用者，该镜像需要进行端口映射。
+
+
+
+### 自定义Brigde
+
+docker网络默认是使用docker0来做网关，但是很多时候我们需要根据业务需要自己定义一下Brigde
+
+```sh
+$ docker network create -d bridge bridge_name
+```
+
+```sh
+$ docker network create -d bridge mybridge  #新建一个bridge
+9ad7eca18a46ff733eca849c008530deca34f67d9f895e007c0463e73630a24b
+
+$ docker network ls  #查看docker网络
+NETWORK ID     NAME       DRIVER    SCOPE
+b8ca79f73455   bridge     bridge    local
+d90ff26166e3   host       host      local
+9ad7eca18a46   mybridge   bridge    local
+82d6ae2e173d   none       null      local
+
+$ docker network inspect 9ad7eca18a46  #查看mybridge
+[
+    {
+        "Name": "mybrigde",
+        "Id": "9ad7eca18a46ff733eca849c008530deca34f67d9f895e007c0463e73630a24b",
+        "Created": "2023-04-22T08:52:55.674403043Z",
+        "Scope": "local",
+        "Driver": "bridge",
+        "EnableIPv6": false,
+        "IPAM": {
+            "Driver": "default",
+            "Options": {},
+            "Config": [
+                {
+                    "Subnet": "172.18.0.0/16",
+                    "Gateway": "172.18.0.1"
+                }
+            ]
+        },
+        "Internal": false,
+        "Attachable": false,
+        "Ingress": false,
+        "ConfigFrom": {
+            "Network": ""
+        },
+        "ConfigOnly": false,
+        "Containers": {},
+        "Options": {},
+        "Labels": {}
+    }
+]
+```
+
+我们可以看到配置中的ip，当我们的容器连接到我们创建的bridge上，会为其分配该bridge子网的ip
+
+#### 连接到指定Brigde
+
+```sh
+$ docker run -d --rm --name box1 busybox:latest /bin/sh -c "while true; do sleep 3600; done"
+```
+
+会默认连接到docker0
+
+需要我们指定到：mybridge
+
+```sh
+$ docker run -d --rm --name box2 --network mybridge busybox:latest /bin/sh -c "while true; do sleep 3600; done"
+3986f6f4ae91633c7c31f60faa0fa136bd884d8b971f570cbeb33563a9bf155c
+
+$ docker run -d --rm --name box3 --network mybridge busybox:latest /bin/sh -c "while true; do sleep 3600; done"
+b91b45d9a8dbe5b19672e5633de4595ed42615c3d0f38dacff4b0bb08103472f
+
+$ docker network ls
+NETWORK ID     NAME       DRIVER    SCOPE
+b8ca79f73455   bridge     bridge    local
+d90ff26166e3   host       host      local
+9ad7eca18a46   mybridge   bridge    local
+82d6ae2e173d   none       null      local
+
+$ docker network inspect 9ad7eca18a46
+[
+    {
+        "Name": "mybridge",
+        "Id": "9ad7eca18a46ff733eca849c008530deca34f67d9f895e007c0463e73630a24b",
+        "Created": "2023-04-22T08:52:55.674403043Z",
+        "Scope": "local",
+        "Driver": "bridge",
+        "EnableIPv6": false,
+        "IPAM": {
+            "Driver": "default",
+            "Options": {},
+            "Config": [
+                {
+                    "Subnet": "172.18.0.0/16",
+                    "Gateway": "172.18.0.1"
+                }
+            ]
+        },
+        "Internal": false,
+        "Attachable": false,
+        "Ingress": false,
+        "ConfigFrom": {
+            "Network": ""
+        },
+        "ConfigOnly": false,
+        "Containers": {
+            "3986f6f4ae91633c7c31f60faa0fa136bd884d8b971f570cbeb33563a9bf155c": {
+                "Name": "box2",
+                "EndpointID": "b3ca1d035c685173124e33d81039ac090dfce7f1a3862aae26bbe3424fa95f9c",
+                "MacAddress": "02:42:ac:12:00:02",
+                "IPv4Address": "172.18.0.2/16",
+                "IPv6Address": ""
+            },
+            "b91b45d9a8dbe5b19672e5633de4595ed42615c3d0f38dacff4b0bb08103472f": {
+                "Name": "box3",
+                "EndpointID": "8f76ce7a717f77d884d3b4341aa5bd4a03d829a8133a02f28aca1c81b67cbd21",
+                "MacAddress": "02:42:ac:12:00:03",
+                "IPv4Address": "172.18.0.3/16",
+                "IPv6Address": ""
+            }
+        },
+        "Options": {},
+        "Labels": {}
+    }
+]
+```
+
+#### 容器连接多个网络
+
+可以将一个容器连接到多个网络Brigde
+
+例如前面的box2已经连接了mybridge，现在我们要讲box2再连接到docker0的bridge网络上
+
+```sh
+$ docker network connect bridge box2
+```
+
+
+
+### host网络
+
+前面我们学习了bridge网络，现在我们来学习一下docker的host网络，host顾名思义，就是容器直接使用宿主ip进行通讯，例如NGINX容器，使用host网络，那么他就会占用宿主机的80端口，mysq则会占用3306端口。
+
+```sh
+$ docker run -d --name nginx-web --network host nginx:latest
+171e3babf161bbda519e4081d11618bbed8e561e276bafebf693687444054fc1
+
+$ docker ps   #PORTS没有信息，相当于在本地启动了一个NGINX服务
+CONTAINER ID   IMAGE            COMMAND                  CREATED             STATUS             PORTS                               NAMES
+171e3babf161   nginx:latest     "/docker-entrypoint.…"   5 seconds ago       Up 4 seconds                                           nginx-web                                        box1
+```
+
+然后查看一下host相关信息：
+
+```sh
+$ docker network ls
+NETWORK ID     NAME       DRIVER    SCOPE
+b8ca79f73455   bridge     bridge    local
+d90ff26166e3   host       host      local
+9ad7eca18a46   mybrigde   bridge    local
+82d6ae2e173d   none       null      local
+
+# iceymoss @ iceymossdeMacBook-Pro in ~ [17:20:02]
+$ docker network inspect d90ff26166e3
+[
+    {
+        "Name": "host",
+        "Id": "d90ff26166e3e699bf40b570c7987da53752e3ca207c10403a9f62e6f5296529",
+        "Created": "2023-04-21T05:43:37.064860583Z",
+        "Scope": "local",
+        "Driver": "host",
+        "EnableIPv6": false,
+        "IPAM": {
+            "Driver": "default",
+            "Options": null,
+            "Config": []
+        },
+        "Internal": false,
+        "Attachable": false,
+        "Ingress": false,
+        "ConfigFrom": {
+            "Network": ""
+        },
+        "ConfigOnly": false,
+        "Containers": {
+            "171e3babf161bbda519e4081d11618bbed8e561e276bafebf693687444054fc1": {
+                "Name": "nginx-web",
+                "EndpointID": "62895ff820b05450de65c356c0122a5fa30626c5f1cd0639638642c6372e5bf0",
+                "MacAddress": "",
+                "IPv4Address": "",
+                "IPv6Address": ""
+            }
+        },
+        "Options": {},
+        "Labels": {}
+    }
+]
+
+```
+
+#### 性能分析
+
+host网络相比于bridge性能更高，因为host直接使用宿主机的ip，不需要进行docker内部bridge复杂的网络，没有更多的消耗。
+
+
+
+### none网络
+
+就是不需要连接任何网络，只是在后台运行一个容器，告诉docker你需要运行容器，网络方面你不需要管理，我自己需要自己配置
+
+```sh
+$ docker run -d --name nginx-web --network none nginx:latest
+```
+
+
+
+
+
