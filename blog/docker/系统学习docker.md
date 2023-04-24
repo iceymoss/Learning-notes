@@ -2805,7 +2805,463 @@ $ docker run -d --name nginx-web --network none nginx:latest
 
 
 
+### 实战
+
+#### Python Flask + Redis 练习
+
+![flask-redis](https://dockertips.readthedocs.io/en/latest/single-host-network/_static/flask-redis.png)
+
+#### 程序准备
+
+准备一个Python文件，名字为 `app.py` 内容如下：
+
+```python
+from flask import Flask
+from redis import Redis
+import os
+import socket
+
+app = Flask(__name__)
+redis = Redis(host=os.environ.get('REDIS_HOST', '127.0.0.1'), port=6379)
+
+
+@app.route('/')
+def hello():
+    redis.incr('hits')
+    return f"Hello Container World! I have been seen {redis.get('hits').decode('utf-8')} times and my hostname is {socket.gethostname()}.\n"
+```
+
+
+
+准备一个Dockerfile
+
+```dockerfile
+FROM python:3.9.5-slim
+
+RUN pip install flask redis && \
+    groupadd -r flask && useradd -r -g flask flask && \
+    mkdir /src && \
+    chown -R flask:flask /src
+
+USER flask
+
+COPY app.py /src/app.py
+
+WORKDIR /src
+
+ENV FLASK_APP=app.py REDIS_HOST=redis
+
+EXPOSE 5000
+
+CMD ["flask", "run", "-h", "0.0.0.0"]
+```
+
+
+
+#### 镜像准备
+
+构建flask镜像，准备一个redis镜像。
+
+```sh
+$ docker image pull redis
+$ docker image build -t flask-demo .
+$ docker image ls
+REPOSITORY   TAG          IMAGE ID       CREATED              SIZE
+flask-demo   latest       4778411a24c5   About a minute ago   126MB
+python       3.9.5-slim   c71955050276   8 days ago           115MB
+redis        latest       08502081bff6   2 weeks ago          105MB
+```
+
+
+
+#### 创建一个docker bridge
+
+```sh
+$ docker network create -d bridge demo-network
+8005f4348c44ffe3cdcbbda165beea2b0cb520179d3745b24e8f9e05a3e6456d
+$ docker network ls
+NETWORK ID     NAME           DRIVER    SCOPE
+2a464c0b8ec7   bridge         bridge    local
+8005f4348c44   demo-network   bridge    local
+80b63f711a37   host           host      local
+fae746a75be1   none           null      local
+$
+```
+
+
+
+#### 创建redis container
+
+创建一个叫 `redis-server` 的container，连到 demo-network上
+
+```sh
+$ docker container run -d --name redis-server --network demo-network redis
+002800c265020310231d689e6fd35bc084a0fa015e8b0a3174aa2c5e29824c0e
+$ docker container ls
+CONTAINER ID   IMAGE     COMMAND                  CREATED         STATUS         PORTS      NAMES
+002800c26502   redis     "docker-entrypoint.s…"   4 seconds ago   Up 3 seconds   6379/tcp   redis-server
+$
+```
+
+
+
+#### 创建flask container
+
+```sh
+$ docker container run -d --network demo-network --name flask-demo --env REDIS_HOST=redis-server -p 5000:5000 flask-demo
+```
+
+
+
+打开浏览器访问 [http://127.0.0.1:5000](http://127.0.0.1:5000/)
+
+应该能看到类似下面的内容，每次刷新页面，计数加1
+
+Hello Container World! I have been seen 36 times and my hostname is 925ecb8d111a.
+
+
+
+#### 总结
+
+如果把上面的步骤合并到一起，成为一个部署脚本
+
+```sh
+# prepare image
+docker image pull redis
+docker image build -t flask-demo .
+
+# create network
+docker network create -d bridge demo-network
+
+# create container
+docker container run -d --name redis-server --network demo-network redis
+docker container run -d --network demo-network --name flask-demo --env REDIS_HOST=redis-server -p 5000:5000 flask-demo
+```
+
+
+
+
+
+## docker compose
+
+### docker compose安装
+
+Windows和Mac在默认安装了docker desktop以后，docker-compose随之自动安装
+
+```
+PS C:\Users\Peng Xiao\docker.tips> docker-compose --version
+docker-compose version 1.29.2, build 5becea4c
+```
+
+
+
+Linux用户需要自行安装
+
+最新版本号可以在这里查询 https://github.com/docker/compose/releases
+
+```
+$ sudo curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+$ sudo chmod +x /usr/local/bin/docker-compose
+$ docker-compose --version
+docker-compose version 1.29.2, build 5becea4c
+```
+
+
+
+熟悉python的朋友，可以使用pip去安装docker-Compose
+
+```
+$ pip install docker-compose
+```
+
+
+
+### docker-compose结构和文件
+
+#### 基本语法结构
+
+```yaml
+version: "3.8"
+
+services: # 容器
+  servicename: # 服务名字，这个名字也是内部 bridge网络可以使用的 DNS name
+    image: # 镜像的名字
+    command: # 可选，如果设置，则会覆盖默认镜像里的 CMD命令
+    environment: # 可选，相当于 docker run里的 --env
+    volumes: # 可选，相当于docker run里的 -v
+    networks: # 可选，相当于 docker run里的 --network
+    ports: # 可选，相当于 docker run里的 -p
+  servicename2:
+
+volumes: # 可选，相当于 docker volume create
+
+networks: # 可选，相当于 docker network create
+```
+
+
+
+以 Python Flask + Redis练习：为例子，改造成一个docker-compose文件
+
+```sh
+docker image pull redis
+docker image build -t flask-demo .
+
+# create network
+docker network create -d bridge demo-network
+
+# create container
+docker container run -d --name redis-server --network demo-network redis
+docker container run -d --network demo-network --name flask-demo --env REDIS_HOST=redis-server -p 5000:5000 flask-demo
+```
+
+
+
+docker-compose.yml 文件如下
+
+```yaml
+version: "3.8"
+
+services:
+  flask-demo:
+    image: flask-demo:latest
+    environment:
+      - REDIS_HOST=redis-server
+    networks:
+      - demo-network
+    ports:
+      - 8080:5000
+
+  redis-server:
+    image: redis:latest
+    networks:
+     - demo-network
+
+networks:
+  demo-network:
+```
+
+#### docker-compose 语法版本
+
+向后兼容
+
+https://docs.docker.com/compose/compose-file/
+
+
+
+### docker compose命令
+
+#### 启动
+
+> docker-compose up
+
+使用启动命令需要先进入对应的目录中，前提条件一定是本地镜像中对应的镜像了
+
+我们需要进入到存储docker-compose.yml文件的目录下
+
+```sh
+docker-compose up   #前台启动，会打印日志，退出容器也就退出
+```
+
+```sh
+docker-compose up -d   #后台启动
+```
+
+
+
+#### 拉取和构建
+
+例如本地如果没有本地镜像，他会去DockerHub进行拉取
+
+```sh
+$ docker-compose pull #拉取
+```
+
+
+
+docker-compose为我们提供了一个构建需要的镜像的命令
+```sh
+$ docker-compose build #构建
+```
+
+前提是我们需要先编写好docker-compse.yml文件
+
+```yaml
+version: "3.8"
+
+services:
+  flask-demo:
+    build: ./docker
+    image: flask-demo:latest
+    environment:
+      - REDIS_HOST=redis-server
+    networks:
+      - demo-network
+    ports:
+      - 8081:5000
+
+  redis-server:
+    image: redis:latest
+    networks:
+     - demo-network
+
+networks:
+  demo-network:
+```
+
+目录结构：
+
+```test
+├── docker
+│   ├── Dockerfile
+│   └── app.py
+├── docker-compose.yml
+```
+
+我们添加了，compose会默认去找./docker命令下的文件，并且需要注意我们没有指定dockerfile文件名称则默认是```Dockerfile```，但是有时候是需要我们指定的
+```
+build: ./docker
+```
+
+
+
+假设结构是这样的：
+
+```
+├── docker
+│   ├── Dockerfile.dev
+│   └── app.py
+├── docker-compose.yml
+```
+
+我们需要这要编写docker-compose.yml文件：
+
+```yaml
+version: "3.8"
+
+services:
+  flask-demo:
+    build:
+      context: ./docker
+      dockerfile: Dockerfile.dev
+    image: flask-demo:latest
+    environment:
+      - REDIS_HOST=redis-server
+    networks:
+      - demo-network
+    ports:
+      - 8081:5000
+
+  redis-server:
+    image: redis:latest
+    networks:
+     - demo-network
+
+networks:
+ 
+```
+
+
+
+### docker-compose服务更新
+
+#### 更新
+
+##### 更新源文件
+
+当我们在使用docker-compos进行构建镜像的时候，当源文件更改后，要如何更新镜像
+
+比如我们上面的```flask-demo```，我们直接修改app.py文件内容，然后发现更新和构建，compose提供了命令：
+
+```
+docker-compose up -d --build
+```
+
+该命令会检查镜像是否需要重新build，即使在容器在运行时也是可以进行构建的然后运行。
+
+
+
+##### 更新compose文件
+
+当我们更新compose文件后，例如：
+
+```yaml
+version: "3.8"
+
+services:
+  flask-demo:
+    build:
+      context: ./docker
+      dockerfile: Dockerfile.dev
+    image: flask-demo:latest
+    environment:
+      - REDIS_HOST=redis-server
+    networks:
+      - demo-network
+    ports:
+      - 8081:5000
+
+  redis-server:
+    image: redis:latest
+    networks:
+     - demo-network
+
+  busybox:
+    image: busybox:latest
+    command: sh -c "while true; do sleep 3600; done"
+    networks:
+      - demo-network
+
+networks:
+  demo-network:
+```
+
+
+
+我们新增了一个busybox的镜像，并执行命令，我们只需要使用：
+
+```
+docker-compose up -d
+```
+
+然后compose就会去拉取对镜像还在构建镜像
+
+
+
+##### 移除镜像
+
+我们在上面实例的基础上移除```busybox```镜像后，运行命令：
+
+```sh
+$ docker-compose up -d  #我们会看到提示
+WARN[0000] Found orphan containers ([hellopy-busybox-1]) for this project. If you removed or renamed this service in your compose file, you can run this command with the --remove-orphans flag to clean it up.
+[+] Running 2/0
+ ✔ Container hellopy-flask-demo-1    Running                                                                                                                                                           0.0s
+ ✔ Container hellopy-redis-server-1  Running
+```
+
+所以我们需要使用命令：
+
+```sh
+$ docker-compose up -d --remove-orphans  
+[+] Running 3/1
+ ✔ Container hellopy-busybox-1       Removed                                                                                                                                                          
+ ✔ Container hellopy-flask-demo-1    Running                                                                                                                                                           
+ ✔ Container hellopy-redis-server-1  Running                                                                                                                                                           
+```
+
+
+
+当然我们可以使用命令重启docker-compose完成内容的更新
+
+```
+docker-compose restart
+```
+
+
+
 ### 未完待续
+
+
 
 
 
