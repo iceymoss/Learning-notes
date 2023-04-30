@@ -2959,7 +2959,7 @@ Linux用户需要自行安装
 
 最新版本号可以在这里查询 https://github.com/docker/compose/releases
 
-```
+```sh
 $ sudo curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
 $ sudo chmod +x /usr/local/bin/docker-compose
 $ docker-compose --version
@@ -3259,7 +3259,813 @@ docker-compose restart
 
 
 
+### docker-compose网络
+
+Docker-compose.yml文件
+
+```yaml
+version: "3.8"
+services: 
+  box1:
+    image: xiaopeng163/net-box:latest
+    command: /bin/sh -c "while true; do sleep 3600; done"
+  box2:
+    image: xiaopeng163/net-box:latest
+    command: /bin/sh -c "while true; do sleep 3600; done"
+```
+
+
+
+```sh
+$ pwd  #当前目录下
+/Users/iceymoss/moss/mybookprom1/iceymoss/dockerlearn/compose
+$ docker-compose pull
+[+] Running 6/6
+ ✔ box2 Skipped - Image is already being pulled by box1                                                                                                0.0s 
+ ✔ box1 4 layers [⣿⣿⣿⣿]      0B/0B      Pulled                                                                                                        31.2s 
+   ✔ a9eaa45ef418 Pull complete                                                                                                                        3.3s 
+   ✔ 44c1752ed77a Pull complete                                                                                                                        6.5s 
+   ✔ 868b03411fc7 Pull complete                                                                                                                        6.6s 
+   ✔ 63906fe482b2 Pull complete                                                                                                                        7.4s 
+#我们启动compose后，docker-compose会创建一个compose_default的网桥
+$ docker-compose up -d
+[+] Running 3/3
+ ✔ Network compose_default   Created                                                                                                                   0.0s 
+ ✔ Container compose-box1-1  Started                                                                                                                   0.5s 
+ ✔ Container compose-box2-1  Started  
+```
+
+也可以是使用命令查看
+```sh
+$ docker network ls
+NETWORK ID     NAME                   DRIVER    SCOPE
+b8ca79f73455   bridge                 bridge    local
+b6024e39aad8   compose_default        bridge    local
+718939d526ea   demo-network           bridge    local
+b96062db2804   docker_demo-network    bridge    local
+aa2909255943   hellopy_demo-network   bridge    local
+d90ff26166e3   host                   host      local
+9ad7eca18a46   mybrigde               bridge    local
+82d6ae2e173d   none                   null      local
+```
+
+然后看细节：
+
+```sh
+$ docker network inspect compose_default
+[
+    {
+        "Name": "compose_default",
+        "Id": "b6024e39aad8079870ad57be523fa4c210d06eee9c16af6ea2d28fa36877c39b",
+        "Created": "2023-04-30T07:13:17.531975672Z",
+        "Scope": "local",
+        "Driver": "bridge",
+        "EnableIPv6": false,
+        "IPAM": {
+            "Driver": "default",
+            "Options": null,
+            "Config": [
+                {
+                    "Subnet": "172.22.0.0/16",
+                    "Gateway": "172.22.0.1"
+                }
+            ]
+        },
+        "Internal": false,
+        "Attachable": false,
+        "Ingress": false,
+        "ConfigFrom": {
+            "Network": ""
+        },
+        "ConfigOnly": false,
+        "Containers": {
+            "2ec2e9f65996f00b2407a43da1bb9260389259271fdcd173ae76051409103f21": {
+                "Name": "compose-box2-1",
+                "EndpointID": "d3b580cee55c5d8fb22ae7849478adf5cbf717e3d35935d77d1debfbba089183",
+                "MacAddress": "02:42:ac:16:00:03",
+                "IPv4Address": "172.22.0.3/16",
+                "IPv6Address": ""
+            },
+            "61a42035833e4641ccb4d3c6d398410d36279996757bfa373b8101aae5e56718": {
+                "Name": "compose-box1-1",
+                "EndpointID": "ea41525d7b6d6a69bd611e3113c3072e302442439ae683d1a2a4faab5e8e3f56",
+                "MacAddress": "02:42:ac:16:00:02",
+                "IPv4Address": "172.22.0.2/16",
+                "IPv6Address": ""
+            }
+        },
+        "Options": {},
+        "Labels": {
+            "com.docker.compose.network": "default",
+            "com.docker.compose.project": "compose",
+            "com.docker.compose.version": "2.17.2"
+        }
+    }
+]
+
+```
+
+我们在介绍docker网络的时候，其实这里就是自定义网络，但单机情况下，docker-compose默认的DRIVER是bridge
+
+
+
+### docker-compose的横向拓展和负载均衡
+
+我们通过实例来介绍
+
+```sh
+$ tree $(pwd)
+/Users/iceymoss/compose-scale-example-1
+├── docker-compose.yml
+└── flask
+    ├── Dockerfile
+    └── app.py
+```
+
+
+
+docker-compose.yml:
+
+```yaml
+version: "3.8"
+
+services:
+  flask:
+    build:
+      context: ./flask
+      dockerfile: Dockerfile
+    image: flask-demo:latest
+    environment:
+      - REDIS_HOST=redis-server
+
+  redis-server:
+    image: redis:latest
+
+  client:
+    image: xiaopeng163/net-box:latest
+    command: sh -c "while true; do sleep 3600; done;"
+```
+
+
+
+Dockerfile:
+
+```dockerfile
+FROM python:3.9.5-slim
+
+RUN pip install flask redis && \
+    groupadd -r flask && useradd -r -g flask flask && \
+    mkdir /src && \
+    chown -R flask:flask /src
+
+USER flask
+
+COPY app.py /src/app.py
+
+WORKDIR /src
+
+ENV FLASK=app.py REDIS_HOST=redis
+
+EXPOSE 5000
+
+CMD ["flask", "run", "-h", "0.0.0.0"]
+```
+
+
+
+App.py：
+
+```python
+from flask import Flask
+from redis import Redis
+import os
+import socket
+
+app = Flask(__name__)
+redis = Redis(host=os.environ.get('REDIS_HOST', '127.0.0.1'), port=6379)
+
+
+@app.route('/')
+def hello():
+    redis.incr('hits')
+    return f"Hello Container World! I have been seen {redis.get('hits').decode('utf-8')} times and my hostname is {socket.gethostname()}.\n"
+
+```
+
+
+
+##### 增加实例
+
+我们启动3个实例
+
+```sh
+$ docker-compose up -d --scale flask=3
+[+] Running 6/6
+ ✔ Network compose-scale-example-1_default           Created                                                                                                                                           0.0s
+ ✔ Container compose-scale-example-1-client-1        Started                                                                                                                                           0.6s
+ ✔ Container compose-scale-example-1-flask-2         Started                                                                                                                                           0.9s
+ ✔ Container compose-scale-example-1-flask-1         Started                                                                                                                                           0.6s
+ ✔ Container compose-scale-example-1-flask-3         Started                                                                                                                                           0.8s
+ ✔ Container compose-scale-example-1-redis-server-1  Started
+```
+
+使用命令：
+
+```sh
+$ docker-compose ps
+NAME                                     IMAGE                        COMMAND                  SERVICE             CREATED             STATUS              PORTS
+compose-scale-example-1-client-1         xiaopeng163/net-box:latest   "sh -c 'while true; …"   client              32 seconds ago      Up 31 seconds
+compose-scale-example-1-flask-1          flask-demo:latest            "flask run -h 0.0.0.0"   flask               32 seconds ago      Up 31 seconds       5000/tcp
+compose-scale-example-1-flask-2          flask-demo:latest            "flask run -h 0.0.0.0"   flask               32 seconds ago      Up 30 seconds       5000/tcp
+compose-scale-example-1-flask-3          flask-demo:latest            "flask run -h 0.0.0.0"   flask               32 seconds ago      Up 31 seconds       5000/tcp
+compose-scale-example-1-redis-server-1   redis:latest                 "docker-entrypoint.s…"   redis-server        32 seconds ago      Up 31 seconds       6379/tcp
+```
+
+可以看到有三个实例在运行
+
+
+
+##### 减少实例
+
+上面我们增加了3个实例，现在我们2两个实例:
+
+```sh
+$ docker-compose up -d --scale flask=1
+[+] Running 3/3
+ ✔ Container compose-scale-example-1-flask-1         Running                                                                                                                                           0.0s
+ ✔ Container compose-scale-example-1-redis-server-1  Running                                                                                                                                           0.0s
+ ✔ Container compose-scale-example-1-client-1        Running                                                                                                                                           0.0s
+$ docker-compose ps
+NAME                                     IMAGE                        COMMAND                  SERVICE             CREATED             STATUS              PORTS
+compose-scale-example-1-client-1         xiaopeng163/net-box:latest   "sh -c 'while true; …"   client              3 minutes ago       Up 3 minutes
+compose-scale-example-1-flask-1          flask-demo:latest            "flask run -h 0.0.0.0"   flask               3 minutes ago       Up 3 minutes        5000/tcp
+compose-scale-example-1-redis-server-1   redis:latest                 "docker-entrypoint.s…"   redis-server        3 minutes ago       Up 3 minutes        6379/tcp
+```
+
+
+
+进入容器：
+
+```sh
+$ docker ps
+CONTAINER ID   IMAGE                        COMMAND                  CREATED             STATUS             PORTS                               NAMES
+a3a69a577dca   flask-demo:latest            "flask run -h 0.0.0.0"   5 seconds ago       Up 4 seconds       5000/tcp                            compose-scale-example-1-flask-3
+26c956340150   flask-demo:latest            "flask run -h 0.0.0.0"   5 seconds ago       Up 4 seconds       5000/tcp                            compose-scale-example-1-flask-2
+b3f3f5b054fb   flask-demo:latest            "flask run -h 0.0.0.0"   10 minutes ago      Up 10 minutes      5000/tcp                            compose-scale-example-1-flask-1
+69cbaa068bee   redis:latest                 "docker-entrypoint.s…"   10 minutes ago      Up 10 minutes      6379/tcp                            compose-scale-example-1-redis-server-1
+add6225dff12   xiaopeng163/net-box:latest   "sh -c 'while true; …"   10 minutes ago      Up 10 minutes                                          compose-scale-example-1-client-1
+61a42035833e   xiaopeng163/net-box:latest   "/bin/sh -c 'while t…"   About an hour ago   Up About an hour                                       compose-box1-1
+2ec2e9f65996   xiaopeng163/net-box:latest   "/bin/sh -c 'while t…"   About an hour ago   Up About an hour                                       compose-box2-1
+203261814d07   redis:latest                 "docker-entrypoint.s…"   5 days ago          Up 5 days          6379/tcp                            hellopy-redis-server-1
+e674a0097a3e   flask-demo:latest            "flask run -h 0.0.0.0"   5 days ago          Up 5 days          0.0.0.0:8081->5000/tcp              hellopy-flask-demo-1
+d9f0c712b309   nginx:latest                 "/docker-entrypoint.…"   8 days ago          Up 8 days          0.0.0.0:8080->80/tcp                competent_buck
+033243ce3801   mysql:latest                 "docker-entrypoint.s…"   9 days ago          Up 9 days          33060/tcp, 0.0.0.0:3307->3306/tcp   server-mysql
+a51d40b5eeea   mongo:latest                 "docker-entrypoint.s…"   9 days ago          Up 9 days          0.0.0.0:27017->27017/tcp            keen_bouman
+0910b6c23f19   redis:latest                 "docker-entrypoint.s…"   9 days ago          Up 9 days          0.0.0.0:6379->6379/tcp              keen_burnell
+```
+
+
+
+使用ping命令：
+
+```sh
+PING flask (172.23.0.4): 56 data bytes
+64 bytes from 172.23.0.4: seq=0 ttl=64 time=0.370 ms
+64 bytes from 172.23.0.4: seq=1 ttl=64 time=0.414 ms
+64 bytes from 172.23.0.4: seq=2 ttl=64 time=0.348 ms
+^C
+--- flask ping statistics ---
+3 packets transmitted, 3 packets received, 0% packet loss
+round-trip min/avg/max = 0.348/0.377/0.414 ms
+/omd # ping flask
+
+PING flask (172.23.0.5): 56 data bytes
+64 bytes from 172.23.0.5: seq=0 ttl=64 time=0.402 ms
+64 bytes from 172.23.0.5: seq=1 ttl=64 time=0.369 ms
+64 bytes from 172.23.0.5: seq=2 ttl=64 time=0.556 ms
+^C
+--- flask ping statistics ---
+3 packets transmitted, 3 packets received, 0% packet loss
+round-trip min/avg/max = 0.369/0.442/0.556 ms
+/omd # ping flask
+
+PING flask (172.23.0.6): 56 data bytes
+64 bytes from 172.23.0.6: seq=0 ttl=64 time=0.598 ms
+64 bytes from 172.23.0.6: seq=1 ttl=64 time=0.357 ms
+64 bytes from 172.23.0.6: seq=2 ttl=64 time=0.374 ms
+```
+
+仔细看，我们每次ping连接到不同的实例
+
+```sh
+/omd # curl flask:5000
+Hello Container World! I have been seen 1 times and my hostname is a3a69a577dca.
+/omd # curl flask:5000
+Hello Container World! I have been seen 2 times and my hostname is a3a69a577dca.
+/omd # curl flask:5000
+Hello Container World! I have been seen 3 times and my hostname is 26c956340150.
+```
+
+
+
+
+
+##### 添加nginx
+
+目录结构：
+
+```sh
+$ tree $(pwd)
+/Users/iceymoss/compose-scale-example-2
+├── README.md
+├── docker-compose.yml
+├── flask
+│   ├── Dockerfile
+│   └── app.py
+├── nginx
+	   └── nginx.conf
+
+```
+
+flask和redis和上一个实例一样，这里只展示nginx/nginx.conf
+
+```
+server {
+  listen  80 default_server;
+  location / {
+    proxy_pass http://flask:5000;
+  }
+}
+```
+
+
+
+docker-compose.yml：
+
+```yaml
+version: "3.8"
+
+services:
+  flask:  #flask镜像
+    build:
+      context: ./flask
+      dockerfile: Dockerfile
+    image: flask-demo:latest
+    environment:
+      - REDIS_HOST=redis-server
+    networks: #连接的docker网络
+      - backend
+      - frontend
+
+  redis-server: #redis镜像
+    image: redis:latest
+    networks:  #连接的docker网络
+      - backend
+
+  nginx:  #nginx镜像
+    image: nginx:stable-alpine
+    ports:
+      - 8000:80 #将镜像端口80映射到宿主机8000端口
+    depends_on: #执行顺序，这里指必须将flask镜像构建完成并运行后才能运行当前镜像
+      - flask
+    volumes: #挂载文件
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro #将./nginx/nginx.conf挂载到镜像中/etc/nginx/conf.d/default.conf；ro表示read-only
+      - ./var/log/nginx:/var/log/nginx   #将镜像中的/var/log/nginx持久化到宿主机./var/log/nginx下
+    networks: #连接的docker网络
+      - frontend
+
+networks:  #创建docker网络
+  backend:
+  frontend:
+
+```
+
+
+
+然后直接启动：
+
+```sh
+$ docker-compose up -d
+```
+
+最后我们之间访问：http://127.0.0.1:8000/
+
+### 环境变量
+
+直接看例子，我们需要然web应用更安全，现在需要给redis设置密码，但是我们的密码不能直接写在```docker-compose.yml```的环境变量中，我们应该将密码写入和docker-compose.yml文件同目录下的：```.env```文件中，docker-compose会去读取对应参数
+
+```yaml
+version: "3.8"
+
+services:
+  flask:  #flask镜像
+    build:
+      context: ./flask
+      dockerfile: Dockerfile
+    image: flask-demo:latest
+    environment:
+      - REDIS_HOST=redis-server
+      - REDIS_PASS=${REDIS_PASSWORD} #flask应用连接到redis，需要使用密码
+    networks: #连接的docker网络
+      - backend
+      - frontend
+
+  redis-server: #redis镜像
+    image: redis:latest
+    command: redis-server --requirepass ${REDIS_PASSWORD}  #给Redis容器设置密码
+    networks:  #连接的docker网络
+      - backend
+
+  nginx:  #nginx镜像
+    image: nginx:stable-alpine
+    ports:
+      - 8000:80 #将镜像端口80映射到宿主机8000端口
+    depends_on: #执行顺序，这里指必须将flask镜像构建完成并运行后才能运行当前镜像
+      - flask
+    volumes: #挂载文件
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro #将./nginx/nginx.conf挂载到镜像中/etc/nginx/conf.d/default.conf；ro表示read-only
+      - ./var/log/nginx:/var/log/nginx   #将镜像中的/var/log/nginx持久化到宿主机./var/log/nginx下
+    networks: #连接的docker网络
+      - frontend
+
+networks:  #创建docker网络
+  backend:
+  frontend:
+```
+
+
+
+.env:
+
+```
+REDIS_PASSWORD=123456
+```
+
+
+
+当使用命令：
+
+```sh
+$ docker-compose config #查看配置信息
+name: compose-scale-example-2
+services:
+  flask:
+    build:
+      context: /Users/iceymoss/moss/mybookprom1/iceymoss/dockerlearn/compose-scale-example-2/flask
+      dockerfile: Dockerfile
+    environment:
+      REDIS_HOST: redis-server
+      REDIS_PASS: "123456"
+    image: flask-demo:latest
+    networks:
+      backend: null
+      frontend: null
+  nginx:
+    depends_on:
+      flask:
+        condition: service_started
+    image: nginx:stable-alpine
+    networks:
+      frontend: null
+    ports:
+    - mode: ingress
+      target: 80
+      published: "8000"
+      protocol: tcp
+    volumes:
+    - type: bind
+      source: /Users/iceymoss/moss/mybookprom1/iceymoss/dockerlearn/compose-scale-example-2/nginx/nginx.conf
+      target: /etc/nginx/conf.d/default.conf
+      read_only: true
+      bind:
+        create_host_path: true
+    - type: bind
+      source: /Users/iceymoss/moss/mybookprom1/iceymoss/dockerlearn/compose-scale-example-2/var/log/nginx
+      target: /var/log/nginx
+      bind:
+        create_host_path: true
+  redis-server:
+    command:
+    - redis-server
+    - --requirepass
+    - "123456"
+    image: redis:latest
+    networks:
+      backend: null
+networks:
+  backend:
+    name: compose-scale-example-2_backend
+  frontend:
+    name: compose-scale-example-2_frontend
+```
+
+
+
+### 容器的健康检查
+
+健康检查是容器运行状态的高级检查，主要是检查容器所运行的进程是否能正常的对外提供“服务”，比如一个数据库容器，我们不光 需要这个容器是up的状态，我们还要求这个容器的数据库进程能够正常对外提供服务，这就是所谓的健康检查。
+
+#### 参数介绍
+
+容器本身有一个健康检查的功能，但是需要在Dockerfile里定义，或者在执行docker container run 的时候，通过下面的一些参数指定
+
+```
+--health-cmd string              Command to run to check health
+--health-interval duration       Time between running the check
+                                (ms|s|m|h) (default 0s)
+--health-retries int             Consecutive failures needed to
+                                report unhealthy
+--health-start-period duration   Start period for the container to
+                                initialize before starting
+                                health-retries countdown
+                                (ms|s|m|h) (default 0s)
+--health-timeout duration        Maximum time to allow one check to
+```
+
+
+
+#### 实例
+
+我们还是以flask框架构建的PythonWeb服务
+
+app.py：
+
+```python
+from flask import Flask
+from redis import StrictRedis
+import os
+import socket
+
+app = Flask(__name__)
+redis = StrictRedis(host=os.environ.get('REDIS_HOST', '127.0.0.1'),
+                    port=6379, password=os.environ.get('REDIS_PASS'))
+
+
+@app.route('/')
+def hello():
+    redis.incr('hits')
+    return f"Hello Container World! I have been seen {redis.get('hits').decode('utf-8')} times and my hostname is {socket.gethostname()}.\n"
+```
+
+
+
+Dockerfile：
+
+```dockerfile
+FROM python:3.9.5-slim
+
+RUN pip install flask redis && \
+    apt-get update && \
+    apt-get install -y curl && \
+    groupadd -r flask && useradd -r -g flask flask && \
+    mkdir /src && \
+    chown -R flask:flask /src
+
+USER flask
+
+COPY app.py /src/app.py
+
+WORKDIR /src
+
+ENV FLASK_APP=app.py REDIS_HOST=redis
+
+EXPOSE 5000
+
+HEALTHCHECK --interval=30s --timeout=3s \
+    CMD curl -f http://localhost:5000/ || exit 1
+
+CMD ["flask", "run", "-h", "0.0.0.0"]
+```
+
+上面Dockerfili里的HEALTHCHECK 就是定义了一个健康检查。 会每隔30秒检查一次，如果失败就会退出，退出代码是1
+
+
+
+#### 构建镜像和创建容器
+
+构建镜像，创建一个bridge网络，然后启动容器连到bridge网络
+
+```sh
+$ docker image build -t flask-demo .
+$ docker network create mybridge
+$ docker container run -d --network mybridge --env REDIS_PASS=abc123 flask-demo
+```
+
+
+
+查看容器状态
+
+```sh
+$ docker container ls
+CONTAINER ID   IMAGE        COMMAND                  CREATED       STATUS                            PORTS      NAMES
+059c12486019   flask-demo   "flask run -h 0.0.0.0"   4 hours ago   Up 8 seconds (health: starting)   5000/tcp   dazzling_tereshkova
+```
+
+
+
+也可以通过```docker container inspect 059``` 查看详情， 其中有有关health的
+
+```
+"Health": {
+"Status": "starting",
+"FailingStreak": 1,
+"Log": [
+    {
+        "Start": "2021-07-14T19:04:46.4054004Z",
+        "End": "2021-07-14T19:04:49.4055393Z",
+        "ExitCode": -1,
+        "Output": "Health check exceeded timeout (3s)"
+    }
+]
+}
+```
+
+经过3次检查，一直是不通的，然后health的状态会从starting变为 unhealthy
+
+```sh
+docker container ls
+CONTAINER ID   IMAGE        COMMAND                  CREATED       STATUS                     PORTS      NAMES
+059c12486019   flask-demo   "flask run -h 0.0.0.0"   4 hours ago   Up 2 minutes (unhealthy)   5000/tcp   dazzling_tereshkova
+```
+
+
+
+#### 启动redis服务器
+
+启动redis，连到mybridge上，name=redis， 注意密码
+
+```sh
+$ docker container run -d --network mybridge --name redis redis:latest redis-server --requirepass abc123
+```
+
+
+
+经过几秒钟，我们的flask 变成了healthy
+
+```sh
+$ docker container ls
+CONTAINER ID   IMAGE          COMMAND                  CREATED          STATUS                   PORTS      NAMES
+bc4e826ee938   redis:latest   "docker-entrypoint.s…"   18 seconds ago   Up 16 seconds            6379/tcp   redis
+059c12486019   flask-demo     "flask run -h 0.0.0.0"   4 hours ago      Up 6 minutes (healthy) 
+```
+
+
+
+### docker-compose服务依赖和健康检查
+
+#### 服务依赖
+
+指服务中的各个容器运行的依赖关系，运行顺序等，它是保证应用能完整启动的重要因素，使用参数：
+
+>depends_on:
+
+
+
+例如：下面运行顺序必须是：```redis-server -> flask -> nginx```
+
+```yaml
+version: "3.8"
+
+services:
+  flask:
+    build:
+      context: ./flask
+      dockerfile: Dockerfile
+    image: flask-demo:latest
+    environment:
+      - REDIS_HOST=redis-server
+      - REDIS_PASS=${REDIS_PASSWORD}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 40s
+    depends_on: #在启动flask前必须启动redis-server
+      - redis-server
+    networks:
+      - backend
+      - frontend
+
+  redis-server:
+    image: redis:latest
+    command: redis-server --requirepass ${REDIS_PASSWORD}
+    networks:
+      - backend
+
+  nginx:
+    image: nginx:stable-alpine
+    ports:
+      - 8000:80
+    depends_on:
+      - flask #启动Nginx前必须启动flaskk
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./var/log/nginx:/var/log/nginx
+    networks:
+      - frontend
+
+networks:
+  backend:
+  frontend:
+```
+
+
+
+
+
+
+
+#### 健康检查
+
+健康检查是容器运行状态的高级检查，主要是检查容器所运行的进程是否能正常的对外提供“服务”，比如一个数据库容器，我们不光 需要这个容器是up的状态，我们还要求这个容器的数据库进程能够正常对外提供服务，这就是所谓的健康检查。
+
+前面我们在构建docker镜像时，介绍了如何进行容器的健康检查，来看看docker-compose是如何实现健康检查的吧。
+
+还是以python的web服务为例，核心是：
+
+```yaml
+ healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000"]  #检查地址
+      interval: 30s   #30秒重试
+      timeout: 3s  #3s无响应则超时
+      retries: 3  #重复3次
+      start_period: 40s  #容器运行40s后开始检查
+```
+
+在nginx镜像中也有需要注意的地方：
+
+```yaml
+depends_on:
+      flask:
+        condition: service_healthy
+```
+
+他不仅需要依赖flask启动后并且还flask是健康状态。
+
+完整docker-compose.yml：
+
+```yaml
+version: "3.8"
+
+services:
+  flask:
+    build:
+      context: ./flask
+      dockerfile: Dockerfile
+    image: flask-demo:latest
+    environment:
+      - REDIS_HOST=redis-server
+      - REDIS_PASS=${REDIS_PASSWORD}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 40s
+    depends_on:
+      - redis-server
+    networks:
+      - backend
+      - frontend
+
+  redis-server:
+    image: redis:latest
+    command: redis-server --requirepass ${REDIS_PASSWORD}
+    networks:
+      - backend
+
+  nginx:
+    image: nginx:stable-alpine
+    ports:
+      - 8000:80
+    depends_on:
+      flask:
+        condition: service_healthy
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./var/log/nginx:/var/log/nginx
+    networks:
+      - frontend
+
+networks:
+  backend:
+  frontend:
+```
+
+
+
+### 投票app的构建
+
+这是github上的一下docker-compose学习的项目
+
+> https://github.com/dockersamples/example-voting-app
+
+
+
 ### 未完待续
+
+
 
 
 
