@@ -6,17 +6,7 @@
 
 ## docker安装
 
-### Linux安装
-
-[docker官网](https://www.docker.com/products/personal/)
-
-### MacOS安装
-
-[docker官网](https://www.docker.com/products/personal/)
-
-### Windows安装
-
-[docker官网](https://www.docker.com/products/personal/)
+安装的话直接去[官网下载](https://www.docker.com/)即可，或者可以查看[菜鸟教程](https://www.runoob.com/docker/ubuntu-docker-install.html)的安装。
 
 ## docker容器
 
@@ -4063,7 +4053,524 @@ networks:
 
 
 
-### 未完待续
+
+
+## 容器编排SWARM
+
+### 为什么不建议在生产环境中使用docker-Compose
+
+- 多机器如何管理？
+- 如果跨机器做scale横向扩展？
+- 容器失败退出时如何新建容器确保服务正常运行？
+- 如何确保零宕机时间？
+- 如何管理密码，Key等敏感数据？
+- 其它
+
+
+
+### 容器编排 swarm
+
+![docker-swarm-intro](https://dockertips.readthedocs.io/en/latest/_images/docker-compose_swarm.png)
+
+Swarm的基本架构
+
+![docker-swarm-arch](https://dockertips.readthedocs.io/en/latest/_images/swarm_arch.png)
+
+### docker swarm vs kubernetes
+
+k8s在容器编排领域处于绝对领先的地位
+
+2021年redhat调查https://www.redhat.com/en/resources/kubernetes-adoption-security-market-trends-2021-overview
+
+![docker-swarm-k8s](https://dockertips.readthedocs.io/en/latest/docker-swarm/_static/docker-swarm/k8s_vs_swarm.png)
+
+为什么还要学些了解docker swarm呢？
+
+原因时docker swarm非常适合容器编排技术的入门，他比k8s简单，但同时他很多地方和K8S相似。
+
+
+
+
+
+### swarm单节点快速搭建
+
+#### ```docker info```命令查看docker配置信息
+
+```bash
+$ docker info
+Client:
+ Context:    default
+ Debug Mode: false
+ Plugins:
+  buildx: Docker Buildx (Docker Inc., v0.10.4)
+  compose: Docker Compose (Docker Inc., v2.17.2)
+  dev: Docker Dev Environments (Docker Inc., v0.1.0)
+  extension: Manages Docker extensions (Docker Inc., v0.2.19)
+  init: Creates Docker-related starter files for your project (Docker Inc., v0.1.0-beta.2)
+  sbom: View the packaged-based Software Bill Of Materials (SBOM) for an image (Anchore Inc., 0.6.0)
+  scan: Docker Scan (Docker Inc., v0.25.0)
+  scout: Command line tool for Docker Scout (Docker Inc., v0.9.0)
+
+Server:
+ Containers: 11
+  Running: 6
+  Paused: 0
+  Stopped: 5
+ Images: 12
+ Server Version: 20.10.24
+ Storage Driver: overlay2
+  Backing Filesystem: extfs
+  Supports d_type: true
+  Native Overlay Diff: true
+  userxattr: false
+ Logging Driver: json-file
+ Cgroup Driver: cgroupfs
+ Cgroup Version: 2
+ Plugins:
+  Volume: local
+  Network: bridge host ipvlan macvlan null overlay
+  Log: awslogs fluentd gcplogs gelf journald json-file local logentries splunk syslog
+ Swarm: inactive
+ Runtimes: io.containerd.runc.v2 io.containerd.runtime.v1.linux runc
+ Default Runtime: runc
+ Init Binary: docker-init
+ containerd version: 2456e983eb9e37e47538f59ea18f2043c9a73640
+ runc version: v1.1.4-0-g5fd4c4d
+ init version: de40ad0
+ Security Options:
+  seccomp
+   Profile: default
+  cgroupns
+ Kernel Version: 5.15.49-linuxkit
+ Operating System: Docker Desktop
+ OSType: linux
+ Architecture: aarch64
+ CPUs: 4
+ Total Memory: 3.841GiB
+ Name: docker-desktop
+ ID: ZZII:4R7L:5AY5:XDAI:OMS7:3XQU:X54A:ZK5B:MTXG:QNQ6:RDS6:MYS4
+ Docker Root Dir: /var/lib/docker
+ Debug Mode: true
+  File Descriptors: 95
+  Goroutines: 95
+  System Time: 2023-05-01T07:20:27.796884129Z
+  EventsListeners: 10
+ HTTP Proxy: http.docker.internal:3128
+ HTTPS Proxy: http.docker.internal:3128
+ No Proxy: hubproxy.docker.internal
+ Registry: https://index.docker.io/v1/
+ Labels:
+ Experimental: false
+ Insecure Registries:
+  hubproxy.docker.internal:5555
+  127.0.0.0/8
+ Registry Mirrors:
+  https://y8jlo4rd.mirror.aliyuncs.com/
+ Live Restore Enabled: false
+
+```
+
+直接看到：
+
+```
+ Swarm: inactive
+```
+
+集群未启动状态
+
+
+
+#### ```docker swarm init```命令启动
+
+```sh
+$ docker swarm init
+Swarm initialized: current node (rphmjmifh51th5g5b9b7bsfto) is now a manager.
+
+To add a worker to this swarm, run the following command:
+
+    docker swarm join --token SWMTKN-1-5oz72zzwjh2efd0ydcbttpm9m0pyj9r9e0zdiuj6dn21eclhrc-2bo2oriscpcqoxdjkvq03rgnd 192.168.65.4:2377
+
+To add a manager to this swarm, run 'docker swarm join-token manager' and follow the instructions.
+
+```
+
+输入命令后主要完成这三件事：
+
+* 创建一个swarm根证书
+* 创建一个manager节点证书
+* 其它节点加入集群需要的tokens
+
+
+
+#### ```docker node ls```查看service细节
+
+```sh
+$ docker node ls
+ID                            HOSTNAME         STATUS    AVAILABILITY   MANAGER STATUS   ENGINE VERSION
+rphmjmifh51th5g5b9b7bsfto *   docker-desktop   Ready     Active         Leader           20.10.24
+```
+
+
+
+#### 启动服务
+
+使用命令：
+
+```sh
+$ docker service create image_name:tag command
+```
+
+实例：
+
+```sh
+$ docker service create nginx:latest
+kllluh78f41gvw29v3pv3n4qq
+overall progress: 1 out of 1 tasks
+1/1: running   [==================================================>]
+verify: Service converged
+```
+
+查看service信息：
+
+```sh
+$ docker service ls
+ID             NAME             MODE         REPLICAS   IMAGE          PORTS
+kllluh78f41g   competent_pike   replicated   1/1        nginx:latest
+```
+
+查看replicated信息：
+
+```bash
+$ docker service ps kllluh78f41g
+ID             NAME               IMAGE          NODE             DESIRED STATE   CURRENT STATE            ERROR     PORTS
+kbba77h8z7xp   competent_pike.1   nginx:latest   docker-desktop   Running         Running 55 seconds ago
+```
+
+我们看到```competent_pike.1```是以```replicated```中的名称```competent_pike```命名的，可以看到具体容器：
+
+```shell
+$ docker container ls
+CONTAINER ID   IMAGE               COMMAND                  CREATED              STATUS              PORTS                               NAMES
+b2d8f8bf1734   nginx:latest        "/docker-entrypoint.…"   About a minute ago   Up About a minute   80/tcp                              competent_pike.1.kbba77h8z7xp7wcpnhbnwudez
+```
+
+
+
+#### 横向扩展service
+
+```bash
+$ docker service update kll --replicas 3  #扩展到3个
+kll
+overall progress: 3 out of 3 tasks
+1/3: running   [==================================================>]
+2/3: running   [==================================================>]
+3/3: running   [==================================================>]
+verify: Service converged
+
+$ docker service ls  #查看service
+ID             NAME             MODE         REPLICAS   IMAGE          PORTS
+kllluh78f41g   competent_pike   replicated   3/3        nginx:latest
+
+$ docker service ps kll  #查看service的具体replicated信息
+ID             NAME               IMAGE          NODE             DESIRED STATE   CURRENT STATE            ERROR     PORTS
+kbba77h8z7xp   competent_pike.1   nginx:latest   docker-desktop   Running         Running 24 minutes ago
+ii7vacxfrjwl   competent_pike.2   nginx:latest   docker-desktop   Running         Running 2 minutes ago
+lwis7lgygm85   competent_pike.3   nginx:latest   docker-desktop   Running         Running 2 minutes ago
+```
+
+
+
+
+
+#### 维护service
+
+上面例子中，我们横向拓展了个service，我们的nginx容器也有3个实例，当我们直接kill掉一个容器：
+
+```bash
+$ docker ps
+CONTAINER ID   IMAGE               COMMAND                  CREATED          STATUS          PORTS                               NAMES
+5ecc47afe8f1   nginx:latest        "/docker-entrypoint.…"   4 minutes ago    Up 4 minutes    80/tcp                              competent_pike.3.lwis7lgygm85julwm8yc3jgt8
+1d5412f96dad   nginx:latest        "/docker-entrypoint.…"   4 minutes ago    Up 4 minutes    80/tcp                              competent_pike.2.ii7vacxfrjwlc806sx7vewjwk
+b2d8f8bf1734   nginx:latest        "/docker-entrypoint.…"   26 minutes ago   Up 26 minutes   80/tcp                              competent_pike.1.kbba77h8z7xp7wcpnhbnwudez
+
+$ docker rm -f 5ecc47afe8f1
+5ecc47afe8f1
+```
+
+然后我们查看swarm的server:
+
+```bash
+$ docker service ls
+ID             NAME             MODE         REPLICAS   IMAGE          PORTS
+kllluh78f41g   competent_pike   replicated   3/3        nginx:latest
+
+$ docker service ps kllluh78f41g
+ID             NAME                   IMAGE          NODE             DESIRED STATE   CURRENT STATE            ERROR                         PORTS
+kbba77h8z7xp   competent_pike.1       nginx:latest   docker-desktop   Running         Running 27 minutes ago
+ii7vacxfrjwl   competent_pike.2       nginx:latest   docker-desktop   Running         Running 5 minutes ago
+l1oigik3otgk   competent_pike.3       nginx:latest   docker-desktop   Running         Running 43 seconds ago
+lwis7lgygm85    \_ competent_pike.3   nginx:latest   docker-desktop   Shutdown        Failed 48 seconds ago    "task: non-zero exit (137)"
+
+```
+
+**解释：当我们的容器出现意外或者其他情况退出后，SWARM会自动帮我们维护之前的3个容器，重新创建对应挂掉的容器，来补补充原来的容器。**
+
+
+
+#### 移除service
+
+```bash
+$ docker service ls
+ID             NAME             MODE         REPLICAS   IMAGE          PORTS
+kllluh78f41g   competent_pike   replicated   3/3        nginx:latest
+
+$ docker service rm kllluh78f41g
+kllluh78f41g
+
+$ docker service ls
+ID        NAME      MODE      REPLICAS   IMAGE     PORTS
+```
+
+
+
+
+
+### SWRAM集群搭建
+
+#### 配置节点
+
+这里的集群我们以3个节点为例：一台manager和两台node，我们需要拥有三个节点，这里提供思路：
+
+* https://labs.play-with-docker.com/  docker为我们提供了web版的虚拟节点。
+* 在本机搭建虚拟机，由于我的环境是mac这里推荐[mac如何安装虚拟机](https://cloud.tencent.com/developer/article/2150583#:~:text=mac%20pro%20M1%20%28ARM%29%E5%AE%89%E8%A3%85%EF%BC%9AVMWare%20Fusion%E5%8F%8Alinux%20%28centos7%2Fubuntu%29%EF%BC%88%E4%B8%80%EF%BC%89,%E5%8F%91%E5%B8%83%E4%BA%8E2022-11-03%2001%3A58%3A50%20%E9%98%85%E8%AF%BB%203.3K%200%200.%E5%BC%95%E8%A8%80%20mac%E5%8F%91%E5%B8%83%E4%BA%86m1%E8%8A%AF%E7%89%87%EF%BC%8C%E5%85%B6%E5%BC%BA%E6%82%8D%E7%9A%84%E6%80%A7%E8%83%BD%E6%94%B6%E5%88%B0%E5%BE%88%E5%A4%9A%E5%BC%80%E5%8F%91%E8%80%85%E7%9A%84%E8%BF%BD%E6%8D%A7%EF%BC%8C%E4%BD%86%E6%98%AF%E4%B9%9F%E5%9B%A0%E4%B8%BA%E5%85%B6%E6%9E%B6%E6%9E%84%E7%9A%84%E6%9B%B4%E6%8D%A2%EF%BC%8C%E5%AF%BC%E8%87%B4%E5%BE%88%E5%A4%9A%E8%BD%AF%E4%BB%B6%E6%88%96%E7%8E%AF%E5%A2%83%E7%9A%84%E5%AE%89%E8%A3%85%E6%88%90%E4%BA%86%E9%97%AE%E9%A2%98%EF%BC%8C%E4%BB%8A%E5%A4%A9%E5%B0%B1%E6%9D%A5%E8%B0%88%E8%B0%88%E5%A6%82%E4%BD%95%E5%9C%A8m1%E4%B8%AD%E5%AE%89%E8%A3%85linux%E8%99%9A%E6%8B%9F%E6%9C%BA)。
+* 使用云厂商，例如腾讯云和阿里云，直接使用他们的服务器，但是金钱成本较高。
+
+
+
+#### 搭建集群
+
+这里搭建了三台服务器(节点)，分别是：192.168.0.26、192.168.0.27、192.168.0.28
+
+* 选择26为manager并打开swarm：
+  ```bash
+  $ docker swarm init --advertise-addr=192.168.0.26 #由于26d有多高对外接口，我们需要进行选择
+  Swarm initialized: current node (o0m93woly7v3wrqkdux36v4b1) is now a manager.
+  
+  To add a worker to this swarm, run the following command:
+  
+      docker swarm join --token SWMTKN-1-40zzj6ap43rvbpgcu43h26ajr7r63ttr1aaanr60shmckyejah-2aebmwe3k190qpf5hzvw3efg3 192.168.0.26:2377
+  
+  To add a manager to this swarm, run 'docker swarm join-token manager' and follow the instructions.
+  
+  ```
+
+* 将27，28几点加入manager节点
+
+  27:
+
+  ```bash
+  $ docker swarm join --token SWMTKN-1-40zzj6ap43rvbpgcu43h26ajr7r63ttr1aaanr60shmckyejah-2aebmwe3k190qpf5hzvw3efg3 192.168.0.26:2377
+  This node joined a swarm as a worker.
+  ```
+
+  28:
+
+  ```bash
+  $ docker swarm join --token SWMTKN-1-40zzj6ap43rvbpgcu43h26ajr7r63ttr1aaanr60shmckyejah-2aebmwe3k190qpf5hzvw3efg3 192.168.0.26:2377
+  This node joined a swarm as a worker.
+  ```
+
+* 查看集群
+
+  ```bash
+  $ docker node ls
+  ID                            HOSTNAME   STATUS    AVAILABILITY   MANAGER STATUS   ENGINE VERSION
+  zwzzjapdzgtkf2550z0koi511     node1      Ready     Active                          20.10.17
+  c9x87lc67sgkr7cafl8bi5fav     node2      Ready     Active                          20.10.17
+  o0m93woly7v3wrqkdux36v4b1 *   node3      Ready     Active         Leader           20.10.17
+  ```
+
+  集群搭建完成。
+
+
+
+#### 快速上手
+
+直接看实例：
+
+```bash
+$ docker service create --name ser1 nginx:latest #启动service
+oe8t1o4hxmq0kgi3pxan09vpz
+overall progress: 1 out of 1 tasks 
+1/1: running   
+verify: Service converged 
+[node3] (local) root@192.168.0.26 ~
+$ docker service ls  #查看service
+ID             NAME      MODE         REPLICAS   IMAGE          PORTS
+oe8t1o4hxmq0   ser1      replicated   1/1        nginx:latest   
+[node3] (local) root@192.168.0.26 ~
+$ docker service ps oe8 #查看service细节
+ID             NAME      IMAGE          NODE      DESIRED STATE   CURRENT STATE                ERROR     PORTS
+d56u06fb5ib0   ser1.1    nginx:latest   node3     Running         Running about a minute ago             
+[node3] (local) root@192.168.0.26 ~
+```
+
+从上面输出可以看到：我们实际容器启动到了我们集群的node3上，可以在node3查看：
+
+```bash
+$ docker ps
+CONTAINER ID   IMAGE          COMMAND                  CREATED         STATUS         PORTS     NAMES
+3594ed694a24   nginx:latest   "/docker-entrypoint.…"   4 minutes ago   Up 4 minutes   80/tcp    ser1.1.d56u06fb5ib0nwk7wjizi1q4j
+```
+
+接着我们来进行横向拓展，将nginx实例增加到3个：
+
+```bash
+$ docker service update ser1 --replicas 3
+ser1
+overall progress: 3 out of 3 tasks 
+1/3: running   
+2/3: running   
+3/3: running   
+verify: Service converged
+
+$ docker service ls
+ID             NAME      MODE         REPLICAS   IMAGE          PORTS
+oe8t1o4hxmq0   ser1      replicated   3/3        nginx:latest 
+
+$ docker service ps oe8 
+ID             NAME      IMAGE          NODE      DESIRED STATE   CURRENT STATE                ERROR     PORTS
+d56u06fb5ib0   ser1.1    nginx:latest   node3     Running         Running 7 minutes ago                  
+tutfirsas80z   ser1.2    nginx:latest   node1     Running         Running about a minute ago             
+u0yzkvjv4ev1   ser1.3    nginx:latest   node2     Running         Running about a minute ago 
+```
+
+看到实例分别运行在了节点1,2,3上。
+
+和单机环境一样，当集群中是实例，意外挂掉后，整个集群依然会维护3个实例，swarm集群会重新启动对应的实例。
+
+
+
+#### service命令介绍
+
+```bash
+$ docker service
+
+Usage:  docker service COMMAND
+
+Manage services
+
+Commands:
+  create      Create a new service #创建service
+  inspect     Display detailed information on one or more services  #展示具体详细信息
+  logs        Fetch the logs of a service or task #日志
+  ls          List services #展示service列表
+  ps          List the tasks of one or more services  #展示具体service信息
+  rm          Remove one or more services #移除service
+  rollback    Revert changes to a service's configuration
+  scale       Scale one or multiple replicated services
+  update      Update a service #服务横向拓展
+
+Run 'docker service COMMAND --help' for more information on a command.
+```
+
+​	
+
+### Swarm 的 overlay 网络详解
+
+对于理解swarm的网络来讲，个人认为最重要的两个点：
+
+- 第一是外部如何访问部署运行在swarm集群内的服务，可以称之为 `入方向` 流量，在swarm里我们通过 `ingress` 来解决
+- 第二是部署在swarm集群里的服务，如何对外进行访问，这部分又分为两块:
+  - 第一，`东西向流量` ，也就是不同swarm节点上的容器之间如何通信，swarm通过 `overlay` 网络来解决；
+  - 第二，`南北向流量` ，也就是swarm集群里的容器如何对外访问，比如互联网，这个是 `Linux bridge + iptables NAT` 来解决的
+
+##### 创建 overlay 网络
+
+```bash
+vagrant@swarm-manager:~$ docker network create -d overlay mynet
+```
+
+
+
+这个网络会同步到所有的swarm节点上
+
+##### 创建服务
+
+创建一个服务连接到这个 overlay网络， name 是 test ， replicas 是 2
+
+```bash
+vagrant@swarm-manager:~$ docker service create --network mynet --name test --replicas 2 busybox ping 8.8.8.8
+vagrant@swarm-manager:~$ docker service ps test
+ID             NAME      IMAGE            NODE            DESIRED STATE   CURRENT STATE            ERROR     PORTS
+yf5uqm1kzx6d   test.1    busybox:latest   swarm-worker1   Running         Running 18 seconds ago
+3tmp4cdqfs8a   test.2    busybox:latest   swarm-worker2   Running         Running 18 seconds ago
+```
+
+
+
+可以看到这两个容器分别被创建在worker1和worker2两个节点上
+
+##### 网络查看
+
+到worker1和worker2上分别查看容器的网络连接情况
+
+```bash
+vagrant@swarm-worker1:~$ docker container ls
+CONTAINER ID   IMAGE            COMMAND          CREATED      STATUS      PORTS     NAMES
+cac4be28ced7   busybox:latest   "ping 8.8.8.8"   2 days ago   Up 2 days             test.1.yf5uqm1kzx6dbt7n26e4akhsu
+vagrant@swarm-worker1:~$ docker container exec -it cac sh
+/ # ip a
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+    valid_lft forever preferred_lft forever
+24: eth0@if25: <BROADCAST,MULTICAST,UP,LOWER_UP,M-DOWN> mtu 1450 qdisc noqueue
+    link/ether 02:42:0a:00:01:08 brd ff:ff:ff:ff:ff:ff
+    inet 10.0.1.8/24 brd 10.0.1.255 scope global eth0
+    valid_lft forever preferred_lft forever
+26: eth1@if27: <BROADCAST,MULTICAST,UP,LOWER_UP,M-DOWN> mtu 1500 qdisc noqueue
+    link/ether 02:42:ac:12:00:03 brd ff:ff:ff:ff:ff:ff
+    inet 172.18.0.3/16 brd 172.18.255.255 scope global eth1
+    valid_lft forever preferred_lft forever
+/ #
+```
+
+
+
+这个容器有两个接口 eth0和eth1， 其中eth0是连到了mynet这个网络，eth1是连到docker_gwbridge这个网络
+
+```bash
+vagrant@swarm-worker1:~$ docker network ls
+NETWORK ID     NAME              DRIVER    SCOPE
+a631a4e0b63c   bridge            bridge    local
+56945463a582   docker_gwbridge   bridge    local
+9bdfcae84f94   host              host      local
+14fy2l7a4mci   ingress           overlay   swarm
+lpirdge00y3j   mynet             overlay   swarm
+c1837f1284f8   none              null      local
+```
+
+
+
+在这个容器里是可以直接ping通worker2上容器的IP 10.0.1.9的
+
+![docker-swarm-overlay](https://dockertips.readthedocs.io/en/latest/_images/swarm-overlay.PNG)
+
+
+
+
+
+## 未完待续
+
+
+
+## 参考
+## 说明
+本文是我在慕课网学习课程《docker 系统入门》课程，总结出的，文字较少，主要是以实例代码的方式来介绍 docker，当然后其中也使用了一些老师课程资料的内容。课程目前还没写完，但是能满足日常后端开发的需求，本文后会持续更新，当然您也可以在我的 [github](https://github.com/iceymoss/Learning-notes/blob/main/blog/docker/%E7%B3%BB%E7%BB%9F%E5%AD%A6%E4%B9%A0docker.md) 查看原文。同时也欢迎小伙伴们指出错误。
+
+### 参考
+[慕课网《系统入门 docker》](https://coding.imooc.com/learn/list/511.html)
 
 
 
