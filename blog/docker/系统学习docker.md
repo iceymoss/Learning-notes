@@ -4559,6 +4559,712 @@ c1837f1284f8   none              null      local
 
 
 
+### Swarm 的 ingress网络
+
+docker swarm的ingress网络又叫 `Ingress Routing Mesh`
+
+主要是为了实现把service的服务端口对外发布出去，让其能够被外部网络访问到。
+
+ingress routing mesh是docker swarm网络里最复杂的一部分内容，包括多方面的内容：
+
+- iptables的 Destination NAT流量转发
+- Linux bridge, network namespace
+- 使用IPVS技术做负载均衡
+- 包括容器间的通信（overlay）和入方向流量的端口转发
+
+
+
+#### service创建
+
+创建一个service，指定网络是overlay的mynet， 通过-p把端口映射出来
+
+我们使用的镜像 `containous/whoami` 是一个简单的web服务，能返回服务器的hostname，和基本的网络信息，比如IP地址
+
+```bash
+vagrant@swarm-manager:~$ docker service create --name web --network mynet -p 8080:80 --replicas 2 containous/whoami
+a9cn3p0ovg5jcz30rzz89lyfz
+overall progress: 2 out of 2 tasks
+1/2: running   [==================================================>]
+2/2: running   [==================================================>]
+verify: Service converged
+vagrant@swarm-manager:~$ docker service ls
+ID             NAME      MODE         REPLICAS   IMAGE                      PORTS
+a9cn3p0ovg5j   web       replicated   2/2        containous/whoami:latest   *:8080->80/tcp
+vagrant@swarm-manager:~$ docker service ps web
+ID             NAME      IMAGE                      NODE            DESIRED STATE   CURRENT STATE            ERROR     PORTS
+udlzvsraha1x   web.1     containous/whoami:latest   swarm-worker1   Running         Running 16 seconds ago
+mms2c65e5ygt   web.2     containous/whoami:latest   swarm-manager   Running         Running 16 seconds ago
+vagrant@swarm-manager:~$
+```
+
+
+
+#### service的访问
+
+8080这个端口到底映射到哪里了？尝试三个swarm节点的IP加端口8080
+
+可以看到三个节点IP都可以访问，并且回应的容器是不同的（hostname），也就是有负载均衡的效果
+
+```bash
+vagrant@swarm-manager:~$ curl 192.168.200.10:8080
+Hostname: fdf7c1354507
+IP: 127.0.0.1
+IP: 10.0.0.7
+IP: 172.18.0.3
+IP: 10.0.1.14
+RemoteAddr: 10.0.0.2:36828
+GET / HTTP/1.1
+Host: 192.168.200.10:8080
+User-Agent: curl/7.68.0
+Accept: */*
+
+vagrant@swarm-manager:~$ curl 192.168.200.11:8080
+Hostname: fdf7c1354507
+IP: 127.0.0.1
+IP: 10.0.0.7
+IP: 172.18.0.3
+IP: 10.0.1.14
+RemoteAddr: 10.0.0.3:54212
+GET / HTTP/1.1
+Host: 192.168.200.11:8080
+User-Agent: curl/7.68.0
+Accept: */*
+
+vagrant@swarm-manager:~$ curl 192.168.200.12:8080
+Hostname: c83ee052787a
+IP: 127.0.0.1
+IP: 10.0.0.6
+IP: 172.18.0.3
+IP: 10.0.1.13
+RemoteAddr: 10.0.0.4:49820
+GET / HTTP/1.1
+Host: 192.168.200.12:8080
+User-Agent: curl/7.68.0
+Accept: */*
+```
+
+
+
+![docker-swarm-ingress-logic](https://dockertips.readthedocs.io/en/latest/_images/swarm-ingress-logic.PNG)
+
+
+
+#### ingress 数据包的走向
+
+以manager节点为例，数据到底是如何达到service的container的
+
+```bash
+vagrant@swarm-manager:~$ sudo iptables -nvL -t nat
+Chain PREROUTING (policy ACCEPT 388 packets, 35780 bytes)
+pkts bytes target     prot opt in     out     source               destination
+296 17960 DOCKER-INGRESS  all  --  *      *       0.0.0.0/0            0.0.0.0/0            ADDRTYPE match dst-type LOCAL
+21365 1282K DOCKER     all  --  *      *       0.0.0.0/0            0.0.0.0/0            ADDRTYPE match dst-type LOCAL
+
+Chain INPUT (policy ACCEPT 388 packets, 35780 bytes)
+pkts bytes target     prot opt in     out     source               destination
+
+Chain OUTPUT (policy ACCEPT 340 packets, 20930 bytes)
+pkts bytes target     prot opt in     out     source               destination
+    8   590 DOCKER-INGRESS  all  --  *      *       0.0.0.0/0            0.0.0.0/0            ADDRTYPE match dst-type LOCAL
+    1    60 DOCKER     all  --  *      *       0.0.0.0/0           !127.0.0.0/8          ADDRTYPE match dst-type LOCAL
+
+Chain POSTROUTING (policy ACCEPT 340 packets, 20930 bytes)
+pkts bytes target     prot opt in     out     source               destination
+    2   120 MASQUERADE  all  --  *      docker_gwbridge  0.0.0.0/0            0.0.0.0/0            ADDRTYPE match src-type LOCAL
+    3   252 MASQUERADE  all  --  *      !docker0  172.17.0.0/16        0.0.0.0/0
+    0     0 MASQUERADE  all  --  *      !docker_gwbridge  172.18.0.0/16        0.0.0.0/0
+
+Chain DOCKER (2 references)
+pkts bytes target     prot opt in     out     source               destination
+    0     0 RETURN     all  --  docker0 *       0.0.0.0/0            0.0.0.0/0
+    0     0 RETURN     all  --  docker_gwbridge *       0.0.0.0/0            0.0.0.0/0
+
+Chain DOCKER-INGRESS (2 references)
+pkts bytes target     prot opt in     out     source               destination
+    2   120 DNAT       tcp  --  *      *       0.0.0.0/0            0.0.0.0/0            tcp dpt:8080 to:172.18.0.2:8080
+302 18430 RETURN     all  --  *      *       0.0.0.0/0            0.0.0.0/0
+```
+
+
+
+通过iptables，可以看到一条DNAT的规则，所有访问本地8080端口的流量都被转发到 172.18.0.2:8080
+
+那这个172.18.0.2 是什么？
+
+首先　172.18.0.0/16　这个网段是 `docker_gwbridge` 的，所以这个地址肯定是连在了 `docker_gwbridge` 上。
+
+`docker network inspect docker_gwbridge` 可以看到这个网络连接了一个叫　`ingress-sbox`　的容器。它的地址就是　172.18.0.2/16
+
+这个　`ingress-sbox`　其实并不是一个容器，而是一个网络的命名空间　network namespace,　我们可以通过下面的方式进入到这个命名空间
+
+```bash
+vagrant@swarm-manager:~$　docker run -it --rm -v /var/run/docker/netns:/netns --privileged=true nicolaka/netshoot nsenter --net=/netns/ingress_sbox sh
+~ # ip a
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+8: eth0@if9: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue state UP group default
+    link/ether 02:42:0a:00:00:02 brd ff:ff:ff:ff:ff:ff link-netnsid 0
+    inet 10.0.0.2/24 brd 10.0.0.255 scope global eth0
+       valid_lft forever preferred_lft forever
+    inet 10.0.0.5/32 scope global eth0
+       valid_lft forever preferred_lft forever
+10: eth1@if11: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default
+    link/ether 02:42:ac:12:00:02 brd ff:ff:ff:ff:ff:ff link-netnsid 1
+    inet 172.18.0.2/16 brd 172.18.255.255 scope global eth1
+       valid_lft forever preferred_lft forever
+```
+
+
+
+通过查看地址，发现这个命名空间连接了两个网络，一个eth1是连接了　`docker_gwbridge`　，另外一个eth0连接了　`ingress` 这个网络。
+
+```bash
+~ # ip route
+default via 172.18.0.1 dev eth1
+10.0.0.0/24 dev eth0 proto kernel scope link src 10.0.0.2
+172.18.0.0/16 dev eth1 proto kernel scope link src 172.18.0.2
+
+~ # iptables -nvL -t mangle
+Chain PREROUTING (policy ACCEPT 22 packets, 2084 bytes)
+ pkts bytes target     prot opt in     out     source               destination
+   12   806 MARK       tcp  --  *      *       0.0.0.0/0            0.0.0.0/0            tcp dpt:8080 MARK set 0x100
+
+Chain INPUT (policy ACCEPT 14 packets, 1038 bytes)
+ pkts bytes target     prot opt in     out     source               destination
+    0     0 MARK       all  --  *      *       0.0.0.0/0            10.0.0.5             MARK set 0x100
+
+Chain FORWARD (policy ACCEPT 8 packets, 1046 bytes)
+ pkts bytes target     prot opt in     out     source               destination
+
+Chain OUTPUT (policy ACCEPT 14 packets, 940 bytes)
+ pkts bytes target     prot opt in     out     source               destination
+
+Chain POSTROUTING (policy ACCEPT 22 packets, 1986 bytes)
+ pkts bytes target     prot opt in     out     source               destination
+~ # ipvsadm
+IP Virtual Server version 1.2.1 (size=4096)
+Prot LocalAddress:Port Scheduler Flags
+  -> RemoteAddress:Port           Forward Weight ActiveConn InActConn
+FWM  256 rr
+  -> 10.0.0.6:0                   Masq    1      0          0
+  -> 10.0.0.7:0                   Masq    1      0          0
+~ #
+```
+
+
+
+通过ipvs做了负载均衡
+
+![docker-swarm-routing-mesh](https://dockertips.readthedocs.io/en/latest/_images/routing-mesh.PNG)
+
+关于这里的负载均衡
+
+- 这是一个stateless load balancing
+- 这是三层的负载均衡，不是四层的 LB is at OSI Layer 3 (TCP), not Layer 4 (DNS)
+- 以上两个限制可以通过Nginx或者HAProxy LB proxy解决 （https://docs.docker.com/engine/swarm/ingress/）
+
+
+
+### 内部负载均衡和 VIP
+
+运行环境说明：
+
+> 三个节点：node1，node2，node3
+
+
+
+先创建一个overlay网络：
+
+```bash
+$ docker network create -d overlay mynet
+9awkfmjvhuke7d3yb2jecvzj5
+[node1] (local) root@192.168.0.18 ~
+$ docker network ls
+NETWORK ID     NAME              DRIVER    SCOPE
+2cfb1322113a   bridge            bridge    local
+6c119cf13ecc   docker_gwbridge   bridge    local
+716510f076fd   host              host      local
+w75bgwb2ry02   ingress           overlay   swarm
+9awkfmjvhuke   mynet             overlay   swarm
+98aeb78df30b   none              null      local
+```
+
+启动服务，运行两个实例：
+
+```bash
+$ docker service create --name web --network mynet --replicas 2 containous/whoami
+t9p1vll3sfbjsi2gx7wypg5ap
+overall progress: 2 out of 2 tasks 
+1/2: running   [==================================================>] 
+2/2: running   [==================================================>] 
+verify: Service converged 
+[node1] (local) root@192.168.0.18 ~
+$ docker service ls
+ID             NAME      MODE         REPLICAS   IMAGE                      PORTS
+t9p1vll3sfbj   web       replicated   2/2        containous/whoami:latest   
+[node1] (local) root@192.168.0.18 ~
+$ docker service ps t9p
+ID             NAME      IMAGE                      NODE      DESIRED STATE   CURRENT STATE            ERROR     PORTS
+048kh84ygctm   web.1     containous/whoami:latest   node1     Running         Running 26 seconds ago            
+xxontz1r3a46   web.2     containous/whoami:latest   node2     Running         Running 27 seconds ago 
+```
+
+实例分别运行在node1和node2节点上。
+
+创建一个client服务：
+
+```bash
+$ docker service create --name client --network mynet xiaopeng163/net-box:latest ping 8.8.8.8
+enspjcqvgyt1w67lvnbj4wo4l
+overall progress: 1 out of 1 tasks 
+1/1: running   [==================================================>] 
+verify: Service converged 
+[node1] (local) root@192.168.0.18 ~
+$ docker service ls
+ID             NAME      MODE         REPLICAS   IMAGE                        PORTS
+enspjcqvgyt1   client    replicated   1/1        xiaopeng163/net-box:latest   
+t9p1vll3sfbj   web       replicated   2/2        containous/whoami:latest     
+[node1] (local) root@192.168.0.18 ~
+$ docker service ps ens
+ID             NAME       IMAGE                        NODE      DESIRED STATE   CURRENT STATE            ERROR     PORTS
+p0dsew02i1o3   client.1   xiaopeng163/net-box:latest   node3     Running         Running 56 seconds ago  
+```
+
+我们看到client对应的容器运行的node3上面，去ping web这个service name， 获取到的IP 10.0.1.2，称之为VIP（虚拟IP）:
+
+```bash
+$ docker ps
+CONTAINER ID   IMAGE                        COMMAND          CREATED         STATUS         PORTS     NAMES
+98498aebb0e5   xiaopeng163/net-box:latest   "ping 8.8.8.8"   2 minutes ago   Up 2 minutes             client.1.p0dsew02i1o3sd8io3fflgwja
+
+$ docker container exec -it 984 sh
+/omd # ls
+/omd # curl web
+Hostname: 12b69a220c5f
+IP: 127.0.0.1
+IP: 10.0.1.3
+IP: 172.18.0.3
+RemoteAddr: 10.0.1.9:43876
+GET / HTTP/1.1
+Host: web
+User-Agent: curl/7.87.0
+Accept: */*
+
+/omd # curl web
+Hostname: c059ded2b97c
+IP: 127.0.0.1
+IP: 10.0.1.4
+IP: 172.18.0.3
+RemoteAddr: 10.0.1.9:43942
+GET / HTTP/1.1
+Host: web
+User-Agent: curl/7.87.0
+Accept: */*
+
+/omd # curl web
+Hostname: 12b69a220c5f
+IP: 127.0.0.1
+IP: 10.0.1.3
+IP: 172.18.0.3
+RemoteAddr: 10.0.1.9:43978
+GET / HTTP/1.1
+Host: web
+User-Agent: curl/7.87.0
+Accept: */*
+
+/omd # curl web
+Hostname: c059ded2b97c
+IP: 127.0.0.1
+IP: 10.0.1.4
+IP: 172.18.0.3
+RemoteAddr: 10.0.1.9:44032
+GET / HTTP/1.1
+Host: web
+User-Agent: curl/7.87.0
+Accept: */*
+
+/omd # ping web -c 2
+PING web (10.0.1.2): 56 data bytes
+64 bytes from 10.0.1.2: seq=0 ttl=64 time=0.337 ms
+64 bytes from 10.0.1.2: seq=1 ttl=64 time=0.183 ms
+
+--- web ping statistics ---
+2 packets transmitted, 2 packets received, 0% packet loss
+round-trip min/avg/max = 0.183/0.260/0.337 ms
+```
+
+我们进入client的容器中使用```curl```命令去请求web，每次返回的```Hostname```等信息都不一样，原因是```swarm```给我们做了负载均衡，这里还要提到一个名称```VIP```虚拟IP的意思。
+
+这个虚拟IP在一个特殊的网络命令空间里，这个空间连接在我们的mynet这个overlay的网络上，通过 docker network inspect mynet 可以看到这个命名空间，叫lb-mynet
+
+```json
+"Containers": {
+            "98498aebb0e55f49bd474240ad8a480d6d52aac277ec7fd959c2e284f5663b45": {
+                "Name": "client.1.p0dsew02i1o3sd8io3fflgwja",
+                "EndpointID": "29e5caa1846ec849ee05e523129fb04284d692aa0ed5cfc7fbc2036c7f361293",
+                "MacAddress": "02:42:0a:00:01:08",
+                "IPv4Address": "10.0.1.8/24",
+                "IPv6Address": ""
+            },
+            "lb-mynet": {
+                "Name": "mynet-endpoint",
+                "EndpointID": "5333d1fe1f88d89334e34dd60523af4bb843d3704a42e493205302efcfa4c8cc",
+                "MacAddress": "02:42:0a:00:01:09",
+                "IPv4Address": "10.0.1.9/24",
+                "IPv6Address": ""
+            }
+        },
+```
+
+通过以下命令可以查看到这个命名空间：
+
+```bash
+$ sudo ls /var/run/docker/netns/  #查看命名空间
+1-9awkfmjvhu  1-w75bgwb2ry  6a303ceebaaf  ingress_sbox  lb_9awkfmjvh
+
+$ sudo nsenter --net=/var/run/docker/netns/1-w75bgwb2ry sh
+~ # ip a
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN qlen 1
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+2: br0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue state UP 
+    link/ether 6e:11:4c:3a:7c:ff brd ff:ff:ff:ff:ff:ff
+    inet 10.0.0.1/24 brd 10.0.0.255 scope global br0
+       valid_lft forever preferred_lft forever
+4: vxlan0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue master br0 state UNKNOWN 
+    link/ether 6e:11:4c:3a:7c:ff brd ff:ff:ff:ff:ff:ff
+6: veth0@if5: <BROADCAST,MULTICAST,UP,LOWER_UP,M-DOWN> mtu 1450 qdisc noqueue master br0 state UP 
+    link/ether be:93:fa:ab:7a:0d brd ff:ff:ff:ff:ff:ff
+~ # 
+```
+
+在命名空间中我们可以看到虚拟```ip:10.0.1.1```
+
+和ingress网络一样，可以查看iptables，ipvs的负载均衡， 基本就可以理解负载均衡是怎么一回事了。 Mark=0x106, 也就是262（十进制），会轮询把请求发给10.0.1.3 和 10.0.1.4
+
+
+
+### 部署多 service 应用
+
+如何像docker-compose一样部署多服务应用，这一节我们先看手动的方式。
+
+这里参考构建镜像源码： https://github.com/xiaopeng163/flask-redis ，我们可以将源码下载后，然后在本地构建镜像，然后上传到dockerhub，这里我在学习的时候课程老师已经准备好了镜像，我们之间去拉取就好了。
+
+我们需要先创建一个mynet的overlay网络，因为上面有创建了，这里就演示了。
+
+```bash
+$ docker network ls
+NETWORK ID     NAME              DRIVER    SCOPE
+2cfb1322113a   bridge            bridge    local
+6c119cf13ecc   docker_gwbridge   bridge    local
+716510f076fd   host              host      local
+w75bgwb2ry02   ingress           overlay   swarm
+9awkfmjvhuke   mynet             overlay   swarm
+98aeb78df30b   none              null      local
+```
+
+环境准备完成后我们先来创建一个redis的service:
+
+```bash
+$ docker service create --network mynet --name redis redis:latest redis-server --requirepass 123456
+1mcaqo2jubxi4jdepdvnuclqz
+overall progress: 1 out of 1 tasks 
+1/1: running   [==================================================>] 
+verify: Service converged
+```
+
+然后再创建一个flask的service:
+
+```bash
+$ docker service create --network mynet --name flask --env REDIS_HOST=redis --env REDIS_PASS=123456 -p 8082:5000 xiaopeng163/flask-redis:latest
+l6hsr4k8hlupzfmnu9mbz6vnp
+overall progress: 1 out of 1 tasks 
+1/1: running   [==================================================>] 
+verify: Service converged
+```
+
+这个web项目就部署完成了：
+
+```bash
+$ docker service ls
+ID             NAME      MODE         REPLICAS   IMAGE                            PORTS
+l6hsr4k8hlup   flask     replicated   1/1        xiaopeng163/flask-redis:latest   *:8082->5000/tcp
+1mcaqo2jubxi   redis     replicated   1/1        redis:latest
+
+$ docker service ps l6hsr4k8hlup
+ID             NAME      IMAGE                            NODE      DESIRED STATE   CURRENT STATE           ERROR     PORTS
+tovlp14a3ok0   flask.1   xiaopeng163/flask-redis:latest   node2     Running         Running 3 minutes ago             
+[node1] (local) root@192.168.0.18 ~/flask-redis
+$ docker service ps 1mcaqo2jubxi
+ID             NAME      IMAGE          NODE      DESIRED STATE   CURRENT STATE           ERROR     PORTS
+m9qei72ccye9   redis.1   redis:latest   node1     Running         Running 5 minutes ago 
+```
+
+然后我们可以两个实例分别在node2和node1上面，现在测试一下这个服务：
+
+```sh
+$ curl 127.0.0.1:8082
+Hello Container World! I have been seen 1 times and my hostname is 3e1f0d5b5842.
+$ curl 127.0.0.1:8082
+Hello Container World! I have been seen 2 times and my hostname is 3e1f0d5b5842.
+$ curl 127.0.0.1:8082
+Hello Container World! I have been seen 3 times and my hostname is 3e1f0d5b5842.
+$ curl 127.0.0.1:8082
+Hello Container World! I have been seen 4 times and my hostname is 3e1f0d5b5842.
+```
+
+和预期一致，简单的部署完成。
+
+
+
+### 说明
+
+后面关于swarm内容我直接搬运了[慕课网《系统入门 docker》](https://coding.imooc.com/learn/list/511.html)老师的课程博客。
+
+
+
+### swarm stack 部署多 service 应用
+
+先在swarm manager节点上安装一下 docker-compose
+
+```bash
+vagrant@swarm-manager:~$ sudo curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+vagrant@swarm-manager:~$ sudo chmod +x /usr/local/bin/docker-compose
+```
+
+
+
+clone我们的代码仓库
+
+```bash
+vagrant@swarm-manager:~$ git clone https://github.com/xiaopeng163/flask-redis
+Cloning into 'flask-redis'...
+remote: Enumerating objects: 22, done.
+remote: Counting objects: 100% (22/22), done.
+remote: Compressing objects: 100% (19/19), done.
+remote: Total 22 (delta 9), reused 7 (delta 2), pack-reused 0
+Unpacking objects: 100% (22/22), 8.60 KiB | 1.07 MiB/s, done.
+vagrant@swarm-manager:~$ cd flask-redis
+vagrant@swarm-manager:~/flask-redis$ ls
+Dockerfile  LICENSE  README.md  app.py  docker-compose.yml
+vagrant@swarm-manager:~/flask-redis$
+```
+
+
+
+环境清理
+
+```bash
+vagrant@swarm-manager:~/flask-redis$ docker system prune -a -f
+```
+
+
+
+镜像构建和提交， 如果你想做这一步，可以把docker-compose.yml里的 `xiaopeng163/flask-redis` 改成你的dockerhub id
+
+```bash
+vagrant@swarm-manager:~/flask-redis$ docker-compose build
+vagrant@swarm-manager:~/flask-redis$ docker image ls
+REPOSITORY                TAG          IMAGE ID       CREATED         SIZE
+xiaopeng163/flask-redis   latest       5efb4fcbcfc3   6 seconds ago   126MB
+python                    3.9.5-slim   c71955050276   3 weeks ago     115MB
+```
+
+
+
+提交镜像到dockerhub
+
+```bash
+vagrant@swarm-manager:~/flask-redis$ docker login
+Login with your Docker ID to push and pull images from Docker Hub. If you don't have a Docker ID, head over to https://hub.docker.com to create one.
+Username: xiaopeng163
+Password:
+WARNING! Your password will be stored unencrypted in /home/vagrant/.docker/config.json.
+Configure a credential helper to remove this warning. See
+https://docs.docker.com/engine/reference/commandline/login/#credentials-store
+
+Login Succeeded
+vagrant@swarm-manager:~/flask-redis$ docker-compose push
+WARNING: The REDIS_PASSWORD variable is not set. Defaulting to a blank string.
+Pushing flask (xiaopeng163/flask-redis:latest)...
+The push refers to repository [docker.io/xiaopeng163/flask-redis]
+f447d33c161b: Pushed
+f7395da2fd9c: Pushed
+5b156295b5a3: Layer already exists
+115e0863702d: Layer already exists
+e10857b94a57: Layer already exists
+8d418cbfaf25: Layer already exists
+764055ebc9a7: Layer already exists
+latest: digest: sha256:c909100fda2f4160b593b4e0fb692b89046cebb909ae90546627deca9827b676 size: 1788
+vagrant@swarm-manager:~/flask-redis$
+```
+
+
+
+通过stack启动服务
+
+```bash
+vagrant@swarm-manager:~/flask-redis$ env REDIS_PASSWORD=ABC123 docker stack deploy --compose-file docker-compose.yml flask-demo
+Ignoring unsupported options: build
+
+Creating network flask-demo_default
+Creating service flask-demo_flask
+Creating service flask-demo_redis-server
+vagrant@swarm-manager:~/flask-redis$
+vagrant@swarm-manager:~/flask-redis$ docker stack ls
+NAME         SERVICES   ORCHESTRATOR
+flask-demo   2          Swarm
+vagrant@swarm-manager:~/flask-redis$ docker stack ps flask-demo
+ID             NAME                        IMAGE                            NODE            DESIRED STATE   CURRENT STATE
+ERROR     PORTS
+lzm6i9inoa8e   flask-demo_flask.1          xiaopeng163/flask-redis:latest   swarm-manager   Running         Running 23 seconds ago
+
+ejojb0o5lbu0   flask-demo_redis-server.1   redis:latest                     swarm-worker2   Running         Running 21 seconds ago
+
+vagrant@swarm-manager:~/flask-redis$ docker stack services flask-demo
+ID             NAME                      MODE         REPLICAS   IMAGE                            PORTS
+mpx75z1rrlwn   flask-demo_flask          replicated   1/1        xiaopeng163/flask-redis:latest   *:8080->5000/tcp
+z85n16zsldr1   flask-demo_redis-server   replicated   1/1        redis:latest
+vagrant@swarm-manager:~/flask-redis$ docker service ls
+ID             NAME                      MODE         REPLICAS   IMAGE                            PORTS
+mpx75z1rrlwn   flask-demo_flask          replicated   1/1        xiaopeng163/flask-redis:latest   *:8080->5000/tcp
+z85n16zsldr1   flask-demo_redis-server   replicated   1/1        redis:latest
+vagrant@swarm-manager:~/flask-redis$ curl 127.0.0.1:8080
+Hello Container World! I have been seen 1 times and my hostname is 21d63a8bfb57.
+vagrant@swarm-manager:~/flask-redis$ curl 127.0.0.1:8080
+Hello Container World! I have been seen 2 times and my hostname is 21d63a8bfb57.
+vagrant@swarm-manager:~/flask-redis$ curl 127.0.0.1:8080
+Hello Container World! I have been seen 3 times and my hostname is 21d63a8bfb57.
+vagrant@swarm-manager:~/flask-redis$
+```
+
+
+
+### 在 swarm 中使用 secret
+
+文档 https://docs.docker.com/engine/swarm/secrets/
+
+#### 创建secret
+
+有两种方式
+
+##### 从标准的收入读取
+
+```bash
+vagrant@swarm-manager:~$ echo abc123 | docker secret create mysql_pass -
+4nkx3vpdd41tbvl9qs24j7m6w
+vagrant@swarm-manager:~$ docker secret ls
+ID                          NAME         DRIVER    CREATED         UPDATED
+4nkx3vpdd41tbvl9qs24j7m6w   mysql_pass             8 seconds ago   8 seconds ago
+vagrant@swarm-manager:~$ docker secret inspect mysql_pass
+[
+    {
+        "ID": "4nkx3vpdd41tbvl9qs24j7m6w",
+        "Version": {
+            "Index": 4562
+        },
+        "CreatedAt": "2021-07-25T22:36:51.544523646Z",
+        "UpdatedAt": "2021-07-25T22:36:51.544523646Z",
+        "Spec": {
+            "Name": "mysql_pass",
+            "Labels": {}
+        }
+    }
+]
+vagrant@swarm-manager:~$ docker secret rm mysql_pass
+mysql_pass
+vagrant@swarm-manager:~$
+```
+
+
+
+##### 从文件读取
+
+```bash
+vagrant@swarm-manager:~$ ls
+mysql_pass.txt
+vagrant@swarm-manager:~$ more mysql_pass.txt
+abc123
+vagrant@swarm-manager:~$ docker secret create mysql_pass mysql_pass.txt
+elsodoordd7zzpgsdlwgynq3f
+vagrant@swarm-manager:~$ docker secret inspect mysql_pass
+[
+    {
+        "ID": "elsodoordd7zzpgsdlwgynq3f",
+        "Version": {
+            "Index": 4564
+        },
+        "CreatedAt": "2021-07-25T22:38:14.143954043Z",
+        "UpdatedAt": "2021-07-25T22:38:14.143954043Z",
+        "Spec": {
+            "Name": "mysql_pass",
+            "Labels": {}
+        }
+    }
+]
+vagrant@swarm-manager:~$
+```
+
+
+
+## secret 的使用
+
+参考 https://hub.docker.com/_/mysql
+
+```bash
+vagrant@swarm-manager:~$ docker service create --name mysql-demo --secret mysql_pass --env MYSQL_ROOT_PASSWORD_FILE=/run/secrets/mysql_pass mysql:5.7
+wb4z2ximgqaefephu9f4109c7
+overall progress: 1 out of 1 tasks
+1/1: running   [==================================================>]
+verify: Service converged
+vagrant@swarm-manager:~$ docker service ls
+ID             NAME         MODE         REPLICAS   IMAGE       PORTS
+wb4z2ximgqae   mysql-demo   replicated   1/1        mysql:5.7
+vagrant@swarm-manager:~$ docker service ps mysql-demo
+ID             NAME           IMAGE       NODE            DESIRED STATE   CURRENT STATE            ERROR     PORTS
+909429p4uovy   mysql-demo.1   mysql:5.7   swarm-worker2   Running         Running 32 seconds ago
+vagrant@swarm-manager:~$
+```
+
+
+
+### swarm 使用 local volume
+
+本节源码，两个文件
+
+```yaml
+docker-compose.yml
+version: "3.8"
+
+services:
+  db:
+    image: mysql:5.7
+    environment:
+      - MYSQL_ROOT_PASSWORD_FILE=/run/secrets/mysql_pass
+    secrets:
+      - mysql_pass
+    volumes:
+      - data:/var/lib/mysql
+
+volumes:
+  data:
+
+secrets:
+  mysql_pass:
+    file: mysql_pass.txt
+```
+
+mysql_pass.txt:
+
+```bash
+vagrant@swarm-manager:~$ more mysql_pass.txt
+abc123
+vagrant@swarm-manager:~$
+```
+
 
 
 ## 未完待续
