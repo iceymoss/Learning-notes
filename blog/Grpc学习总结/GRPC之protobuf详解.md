@@ -9,6 +9,36 @@
 ### protobuf 介绍
 protobuf 全称 Google Protocol Buffers，是 google 开发的的一套用于数据存储，网络通信时用于协议编解码的工具库。protobuf 是一种灵活高效的独立于语言平台的结构化数据表示方法。在通信协议和数据存储等领域中使用比较多。protobuf 对于结构中的每个成员会提供 set 系列函数和 get 系列函数。与 XML 相比，protoBuf 更小更快更简单。你可以用定义 protobuf 的数据结构。用 protobuf 编译器生成特定语言的源代码，如 C++，Java，go，Python 等，proto 文件是以 xxx.proto 命名的。
 
+### Grpc的安装
+这里以mac为例，先安装插件：
+```
+brew install protobuf
+```
+检查是否安装成功：
+```
+$ protoc --version
+
+libprotoc 28.3
+```
+
+这里我是用go来开发的，拉取go相关插件
+```
+go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+```
+
+检查是否安装成功：
+```
+which protoc-gen-go
+which protoc-gen-go-grpc
+
+输出：
+/Users/iceymoss/go/bin/protoc-gen-go
+/Users/iceymoss/go/bin/protoc-gen-go-grpc
+```
+
+
+
 ### 基本类型
 
 - ###### int
